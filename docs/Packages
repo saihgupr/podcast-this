@@ -18,6 +18,23 @@ Package: com.saihgupr.podcastthis
 Name: PodcastThis
 Depends: firmware (>= 14.0), python3, ffmpeg
 Description: Convert YouTube videos and channels into offline audio-only podcasts natively on-device.
+Icon: https://saihgupr.github.io/podcast-this/CydiaIcon.png
+Maintainer: saihgupr
+Author: saihgupr
+Section: Multimedia
+Architecture: iphoneos-arm64
+Version: 1.0.1
+Installed-Size: 10468
+Filename: ./com.saihgupr.podcastthis_1.0.1_iphoneos-arm64.deb
+Size: 5324954
+MD5sum: 68e8314952eb29b75c1610e6c037ed4d
+SHA1: bc10a4344c12a524a1e0bef2a8b70e4c9a3806b7
+SHA256: 2f7ab904b369fd8e9e24dd5520c0e3f1ceb92e75043cc173d90ca115c0762a88
+
+Package: com.saihgupr.podcastthis
+Name: PodcastThis
+Depends: firmware (>= 14.0), python3, ffmpeg
+Description: Convert YouTube videos and channels into offline audio-only podcasts natively on-device.
 Maintainer: saihgupr
 Author: saihgupr
 Section: Multimedia
@@ -29,4 +46,21 @@ Size: 5324984
 MD5sum: 73f602158b3613ba3d48b7b8f34e0aaf
 SHA1: 59e151ec1ceb1e4963c8e9f44ae5afbf6582c99f
 SHA256: a3db51800ce5d431b4c2047ee52f02334994fca2bd24fe8ac9ec3854c0ac12b0
+
+Package: com.saihgupr.podcastthis
+Name: PodcastThis
+Depends: firmware (>= 14.0), python3, ffmpeg
+Description: Convert YouTube videos and channels into offline audio-only podcasts natively on-device.
+Icon: https://saihgupr.github.io/podcast-this/CydiaIcon.png
+Maintainer: saihgupr
+Author: saihgupr
+Section: Multimedia
+Architecture: iphoneos-arm
+Version: 1.0.1
+Installed-Size: 10468
+Filename: ./com.saihgupr.podcastthis_1.0.1_iphoneos-arm.deb
+Size: 5325042
+MD5sum: 2f6f0570bf51274de9d875e3a5abd90a
+SHA1: 1d722d15dc536a915b682b37b5e7571e70120e5b
+SHA256: 3eac7b84e4c7508f0c51dec96ad68d8797e90e81b8defc32d1345fa9f3c91143
 

@@ -26,3 +26,4 @@ scratch/
 # Personal deployment script (device-specific, not for distribution)
 deploy.sh
 .git-backup-*
+!docs/*.deb
