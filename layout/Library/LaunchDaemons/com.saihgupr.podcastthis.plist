@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.saihgupr.podcastthis</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/var/jb/usr/bin/python3</string>
+        <string>-u</string>
+        <string>/var/jb/usr/local/bin/podcastthis-daemon</string>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/var/mobile/Library/Application Support/PodcastThis/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/mobile/Library/Application Support/PodcastThis/daemon.err</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>7200</integer>
+    <key>JetsamProperties</key>
+    <dict>
+        <key>JetsamMemoryLimit</key>
+        <integer>512</integer>
+    </dict>
+</dict>
+</plist>
