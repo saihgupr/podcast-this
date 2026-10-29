@@ -1,0 +1,9 @@
+Package: com.saihgupr.podcastthis
+Name: PodcastThis
+Depends: firmware (>= 14.0), python3, ffmpeg
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Convert YouTube videos and channels into offline audio-only podcasts natively on-device.
+Maintainer: saihgupr
+Author: saihgupr
+Section: Multimedia

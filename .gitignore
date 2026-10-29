@@ -1,0 +1,28 @@
+# Theos build artifacts
+.theos/
+packages/
+*.deb
+
+# WhisperX Service local environment, model cache, and credentials
+services/whisperx-service/venv/
+services/whisperx-service/cache/
+services/whisperx-service/.env
+services/whisperx-service/__pycache__/
+*.pyc
+
+# Python / macOS caches
+__pycache__/
+.DS_Store
+*.o
+*.a
+scratch/
+
+# Generated layout copies (canonical sources live in downloader/; deploy.sh copies at build)
+/layout/usr/local/bin/podcastthis-add
+/layout/usr/local/bin/podcastthis-daemon
+/layout/usr/local/bin/qjs
+/layout/usr/local/bin/yt-dlp
+
+# Personal deployment script (device-specific, not for distribution)
+deploy.sh
+.git-backup-*

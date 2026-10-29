@@ -1,0 +1,587 @@
+#!/usr/bin/env python3
+import os
+import sys
+import fcntl
+import argparse
+import json
+import subprocess
+from datetime import datetime
+
+# Ensure jailbreak and standard binary paths are in PATH for subprocesses
+paths_to_add = [
+    "/var/jb/usr/local/bin",
+    "/var/jb/usr/bin",
+    "/var/jb/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin"
+]
+current_path = os.environ.get("PATH", "")
+existing_paths = set(current_path.split(os.pathsep))
+new_paths = [p for p in paths_to_add if p not in existing_paths]
+if new_paths:
+    os.environ["PATH"] = os.pathsep.join(new_paths) + (os.pathsep + current_path if current_path else "")
+
+for cert_path in ["/var/jb/etc/ssl/cert.pem", "/var/jb/etc/ssl/certs/cacert.pem", "/etc/ssl/cert.pem"]:
+    if os.path.exists(cert_path):
+        os.environ["SSL_CERT_FILE"] = cert_path
+        break
+
+if os.path.exists("/var/mobile/Library/Application Support"):
+    BASE_DIR = "/var/mobile/Library/Application Support/PodcastThis"
+else:
+    BASE_DIR = os.path.expanduser("~/Library/Application Support/PodcastThis")
+
+STATE_FILE = os.path.join(BASE_DIR, "state.json")
+SYNC_STATUS_FILE = os.path.join(BASE_DIR, "sync_status.json")
+LOCK_FILE = os.path.join(BASE_DIR, "daemon.lock")
+
+def get_power_status():
+    """
+    Query battery percentage and charging state safely via IOKit or UIKit.
+    Returns dict:
+      - "level": int (0-100) or None
+      - "is_charging": bool or None
+      - "external_connected": bool or None
+    """
+    info = {"level": None, "is_charging": None, "external_connected": None}
+    
+    # 1. Try IOKit IORegistry (macOS & iOS jailbreak/rootless)
+    try:
+        import ctypes
+        import ctypes.util
+        cf_path = ctypes.util.find_library("CoreFoundation")
+        iokit_path = ctypes.util.find_library("IOKit")
+        if cf_path and iokit_path:
+            cf = ctypes.cdll.LoadLibrary(cf_path)
+            iokit = ctypes.cdll.LoadLibrary(iokit_path)
+            
+            kCFStringEncodingUTF8 = 0x08000100
+            kCFNumberLongLongType = 4
+            
+            cf.CFStringCreateWithCString.restype = ctypes.c_void_p
+            cf.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
+            cf.CFRelease.restype = None
+            cf.CFRelease.argtypes = [ctypes.c_void_p]
+            cf.CFDictionaryGetValue.restype = ctypes.c_void_p
+            cf.CFDictionaryGetValue.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            cf.CFNumberGetValue.restype = ctypes.c_bool
+            cf.CFNumberGetValue.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+            cf.CFBooleanGetValue.restype = ctypes.c_bool
+            cf.CFBooleanGetValue.argtypes = [ctypes.c_void_p]
+            
+            iokit.IOServiceMatching.restype = ctypes.c_void_p
+            iokit.IOServiceMatching.argtypes = [ctypes.c_char_p]
+            iokit.IOServiceGetMatchingService.restype = ctypes.c_uint32
+            iokit.IOServiceGetMatchingService.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+            iokit.IORegistryEntryCreateCFProperties.restype = ctypes.c_int32
+            iokit.IORegistryEntryCreateCFProperties.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.c_uint32]
+            iokit.IOObjectRelease.restype = ctypes.c_int32
+            iokit.IOObjectRelease.argtypes = [ctypes.c_uint32]
+            
+            for sname in [b"AppleSmartBattery", b"IOPMPowerSource", b"AppleARMPMUCharger"]:
+                matching = iokit.IOServiceMatching(sname)
+                service = iokit.IOServiceGetMatchingService(0, matching)
+                if not service:
+                    continue
+                props = ctypes.c_void_p()
+                if iokit.IORegistryEntryCreateCFProperties(service, ctypes.byref(props), None, 0) == 0 and props:
+                    def get_dict_num(key_name):
+                        k = cf.CFStringCreateWithCString(None, key_name.encode("utf-8"), kCFStringEncodingUTF8)
+                        val_ref = cf.CFDictionaryGetValue(props, k)
+                        cf.CFRelease(k)
+                        if val_ref:
+                            v = ctypes.c_longlong(0)
+                            if cf.CFNumberGetValue(val_ref, kCFNumberLongLongType, ctypes.byref(v)):
+                                return v.value
+                        return None
+                        
+                    def get_dict_bool(key_name):
+                        k = cf.CFStringCreateWithCString(None, key_name.encode("utf-8"), kCFStringEncodingUTF8)
+                        val_ref = cf.CFDictionaryGetValue(props, k)
+                        cf.CFRelease(k)
+                        if val_ref:
+                            return bool(cf.CFBooleanGetValue(val_ref))
+                        return None
+                        
+                    cur = get_dict_num("CurrentCapacity")
+                    max_cap = get_dict_num("MaxCapacity")
+                    if cur is not None and max_cap is not None and max_cap > 0:
+                        info["level"] = int(round((cur / max_cap) * 100))
+                        
+                    is_chg = get_dict_bool("IsCharging")
+                    if is_chg is not None:
+                        info["is_charging"] = is_chg
+                        
+                    ext = get_dict_bool("ExternalConnected")
+                    if ext is not None:
+                        info["external_connected"] = ext
+                        
+                    cf.CFRelease(props)
+                iokit.IOObjectRelease(service)
+                if info["level"] is not None:
+                    break
+    except Exception:
+        pass
+        
+    return info
+
+def find_python_executable():
+    for path in [
+        "/var/jb/usr/local/bin/python3.12",
+        "/var/jb/usr/bin/python3.12",
+        "/var/jb/usr/bin/python3.11",
+        "/usr/local/bin/python3.12",
+        "/usr/local/bin/python3.11",
+        sys.executable
+    ]:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            if path == sys.executable:
+                if sys.version_info >= (3, 10):
+                    return path
+            else:
+                return path
+    return sys.executable
+
+def get_ytdlp_base_cmd():
+    py = find_python_executable()
+    for ytdlp_path in [
+        "/var/jb/usr/local/lib/yt-dlp",
+        "/var/jb/usr/local/bin/yt-dlp",
+        "/var/jb/usr/bin/yt-dlp",
+        "/usr/local/bin/yt-dlp",
+        os.path.join(os.path.dirname(__file__), "yt-dlp")
+    ]:
+        if os.path.isfile(ytdlp_path):
+            return [py, ytdlp_path]
+            
+    import shutil
+    which_path = shutil.which("yt-dlp")
+    if which_path:
+        return [py, which_path]
+    return [py, "yt-dlp"]
+
+def fix_permissions(path):
+    if os.getuid() == 0:  # Running as root
+        try:
+            import pwd
+            mobile_user = pwd.getpwnam("mobile")
+            uid = mobile_user.pw_uid
+            gid = mobile_user.pw_gid
+            os.chown(path, uid, gid)
+        except Exception:
+            try:
+                os.chmod(path, 0o666)
+            except Exception:
+                pass
+
+def update_sync_status(status, message="", channel_title=None, current=0, total=0, is_syncing=True):
+    try:
+        os.makedirs(BASE_DIR, exist_ok=True)
+        fix_permissions(BASE_DIR)
+        data = {
+            "status": status,  # "idle", "checking", "downloading", "error"
+            "message": message,
+            "channel_title": channel_title or "",
+            "current_channel": current,
+            "total_channels": total,
+            "is_syncing": is_syncing,
+            "timestamp": datetime.now().timestamp(),
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        with open(SYNC_STATUS_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        fix_permissions(SYNC_STATUS_FILE)
+    except Exception as e:
+        print(f"[-] Error saving sync status: {e}", file=sys.stderr)
+
+def acquire_lock():
+    try:
+        os.makedirs(BASE_DIR, exist_ok=True)
+        fix_permissions(BASE_DIR)
+        lock_fd = open(LOCK_FILE, "w")
+        fix_permissions(LOCK_FILE)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_fd
+    except (IOError, BlockingIOError):
+        return None
+    except Exception:
+        return None
+
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {"subscriptions": [], "playback_progress": {}}
+    try:
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {"subscriptions": [], "playback_progress": {}}
+
+def save_state(state):
+    try:
+        os.makedirs(BASE_DIR, exist_ok=True)
+        fix_permissions(BASE_DIR)
+        
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+        fix_permissions(STATE_FILE)
+    except Exception as e:
+        print(f"[-] Error saving state: {e}", file=sys.stderr)
+
+def notify_app_reload():
+    try:
+        subprocess.run(["/var/jb/usr/bin/killall", "-USR1", "PodcastThis"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except Exception:
+        pass
+
+def run_cmd(cmd):
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace")
+        return result.stdout.strip()
+    except Exception as e:
+        print(f"[-] Command failed: {' '.join(cmd)}\nError: {e}", file=sys.stderr)
+        return None
+
+def get_channel_collaborations(channel_url):
+    """
+    Fetch the channel's home page and extract videos from the 'Collaborations' shelf.
+    Returns list of dicts: [{'id': ..., 'title': ..., 'url': ..., 'is_collab': True}]
+    """
+    try:
+        import urllib.request
+        import re
+        base_url = channel_url.split('?')[0].split('#')[0].rstrip('/')
+        if base_url.endswith('/videos') or base_url.endswith('/shorts') or base_url.endswith('/streams'):
+            base_url = base_url.rsplit('/', 1)[0]
+            
+        req = urllib.request.Request(
+            base_url,
+            headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
+        )
+        with urllib.request.urlopen(req, timeout=8) as response:
+            html = response.read().decode('utf-8', 'ignore')
+            
+        m = re.search(r'var ytInitialData = ({.*?});</script>', html)
+        if not m:
+            return []
+            
+        data = json.loads(m.group(1))
+        collabs = []
+        
+        def search_shelves(obj):
+            if isinstance(obj, dict):
+                title = obj.get("title")
+                if isinstance(title, dict) and title.get("simpleText") == "Collaborations":
+                    items = obj.get("content", {}).get("horizontalListRenderer", {}).get("items", [])
+                    for item in items:
+                        lockup = item.get("lockupViewModel", {})
+                        vid_id = lockup.get("contentId")
+                        metadata = lockup.get("metadata", {}).get("lockupMetadataViewModel", {})
+                        t = metadata.get("title", {}).get("content", "")
+                        if vid_id and vid_id not in [c["id"] for c in collabs]:
+                            collabs.append({
+                                "id": vid_id,
+                                "title": t,
+                                "url": f"https://www.youtube.com/watch?v={vid_id}",
+                                "is_collab": True
+                            })
+                for v in obj.values():
+                    search_shelves(v)
+            elif isinstance(obj, list):
+                for item in obj:
+                    search_shelves(item)
+                    
+        search_shelves(data)
+        return collabs
+    except Exception as e:
+        print(f"[-] Warning: Failed to fetch channel collaborations: {e}", file=sys.stderr)
+        return []
+
+def get_videos_tab_url(url):
+    # Ensure channel_url targets the `/videos` tab to avoid shorts/live streams
+    if any(x in url for x in ["/channel/", "/c/", "/user/", "@"]):
+        base_url = url.split('?')[0].split('#')[0].rstrip('/')
+        if base_url.endswith('/shorts'):
+            base_url = base_url[:-7] + '/videos'
+        elif base_url.endswith('/streams'):
+            base_url = base_url[:-8] + '/videos'
+        elif not base_url.endswith('/videos'):
+            base_url = f"{base_url}/videos"
+        
+        suffix_idx = len(url.split('?')[0].split('#')[0].rstrip('/'))
+        url = base_url + url[suffix_idx:]
+    return url
+
+def check_channel_new_uploads(channel_url, progress_keys, last_seen_video_id):
+    channel_url_videos = get_videos_tab_url(channel_url)
+    # Fetch flat list of video IDs from the channel uploads (checking up to 10 latest entries)
+    cmd = get_ytdlp_base_cmd() + [
+        "--js-runtimes", "quickjs",
+        "--no-check-certificates",
+        "--flat-playlist",
+        "--dump-json",
+        "--playlist-end", "10",
+        channel_url_videos
+    ]
+    output = run_cmd(cmd)
+    
+    newest_video_id = None
+    all_entries = []
+    if output:
+        lines = output.splitlines()
+        for line in lines:
+            try:
+                video_info = json.loads(line)
+                video_id = video_info.get("id")
+                entry_url = video_info.get("url") or video_info.get("original_url") or video_info.get("webpage_url") or ""
+                if video_id and "/shorts/" not in entry_url:
+                    if newest_video_id is None:
+                        newest_video_id = video_id
+                    all_entries.append({
+                        "id": video_id,
+                        "url": f"https://www.youtube.com/watch?v={video_id}",
+                        "title": video_info.get("title", ""),
+                        "is_collab": False
+                    })
+            except Exception:
+                continue
+
+    # Also check for collaborative videos present on the channel's home page
+    collab_entries = get_channel_collaborations(channel_url)
+    new_collabs = [c for c in collab_entries if c["id"] not in progress_keys]
+    if new_collabs:
+        print(f"[+] Found {len(new_collabs)} new collaborative video(s) on channel home page.")
+            
+    standard_new_videos = []
+    if all_entries:
+        if last_seen_video_id:
+            for entry in all_entries:
+                if entry["id"] == last_seen_video_id:
+                    break
+                if entry["id"] not in progress_keys:
+                    standard_new_videos.append(entry)
+            standard_new_videos.reverse()
+        else:
+            # If no last_seen_video_id, check if any entries are already known in progress_keys
+            has_known_episodes = any(e["id"] in progress_keys for e in all_entries)
+            if has_known_episodes:
+                for entry in all_entries:
+                    if entry["id"] in progress_keys:
+                        break
+                    standard_new_videos.append(entry)
+                standard_new_videos.reverse()
+            else:
+                # Initializing for a channel with no known episodes: download the newest upload
+                print(f"[*] Initializing last_seen_video_id to: {newest_video_id} and downloading newest upload.")
+                if newest_video_id:
+                    standard_new_videos = [{"id": newest_video_id, "url": f"https://www.youtube.com/watch?v={newest_video_id}", "is_collab": False}]
+
+    combined_videos = standard_new_videos + [c for c in new_collabs if c["id"] not in [v["id"] for v in standard_new_videos]]
+    return combined_videos, newest_video_id
+
+def process_channel(channel_url, channel_title, channel_id, last_seen, idx, total_channels):
+    update_sync_status(
+        "checking",
+        f"Checking {channel_title} ({idx}/{total_channels})" if total_channels > 1 else f"Checking {channel_title} for new episodes...",
+        channel_title=channel_title,
+        current=idx,
+        total=total_channels,
+        is_syncing=True
+    )
+    
+    fresh_state = load_state()
+    progress_keys = set(fresh_state.get("playback_progress", {}).keys())
+    
+    # If channel_id was provided, ensure last_seen is fresh from latest state
+    if channel_id:
+        for s in fresh_state.get("subscriptions", []):
+            if s.get("channel_id") == channel_id:
+                last_seen = s.get("last_seen_video_id")
+                break
+                
+    print(f"[*] Checking channel: {channel_title} (last seen: {last_seen})")
+    new_videos, newest_video_id = check_channel_new_uploads(channel_url, progress_keys, last_seen)
+    
+    downloaded_count = 0
+    py = find_python_executable()
+    add_script = "/var/jb/usr/local/bin/podcastthis-add"
+    if not os.path.exists(add_script):
+        add_script = os.path.join(os.path.dirname(__file__), "podcastthis-add")
+
+    for video in new_videos:
+        # Check power status before starting heavy download
+        power = get_power_status()
+        lvl = power.get("level")
+        is_charging = power.get("is_charging") or power.get("external_connected")
+        if lvl is not None and lvl < 20 and not is_charging:
+            print(f"[-] Battery dropped to {lvl}%. Pausing remaining downloads to conserve power.", file=sys.stderr)
+            update_sync_status("idle", f"Battery low ({lvl}%). Remaining downloads paused until charged.", channel_title=channel_title, total=total_channels, is_syncing=False)
+            break
+
+        video_title = video.get("title") or video["id"]
+        is_collab = video.get("is_collab", False)
+        prefix = "collaborative " if is_collab else ""
+        print(f"[+] Found new {prefix}video: {video['url']} ({video_title}). Triggering download...")
+        update_sync_status(
+            "downloading",
+            f"Downloading new {prefix}episode from {channel_title}...",
+            channel_title=channel_title,
+            current=idx,
+            total=total_channels,
+            is_syncing=True
+        )
+        
+        cmd_args = [py, add_script, video["url"]]
+        if channel_title:
+            cmd_args.extend(["--channel", channel_title])
+        if channel_url:
+            cmd_args.extend(["--channel-url", channel_url])
+            
+        res = subprocess.run(cmd_args)
+        if res.returncode == 0:
+            downloaded_count += 1
+            fresh_state = load_state()
+            if channel_id and not is_collab:
+                for s in fresh_state.get("subscriptions", []):
+                    if s.get("channel_id") == channel_id:
+                        s["last_seen_video_id"] = video["id"]
+                        break
+                save_state(fresh_state)
+            notify_app_reload()
+        else:
+            print(f"[-] Download failed for {video['url']}. Halting download queue for this channel to retry next time.", file=sys.stderr)
+            break
+            
+    if not new_videos and newest_video_id and newest_video_id != last_seen and channel_id:
+        fresh_state = load_state()
+        for s in fresh_state.get("subscriptions", []):
+            if s.get("channel_id") == channel_id:
+                s["last_seen_video_id"] = newest_video_id
+                break
+        save_state(fresh_state)
+        notify_app_reload()
+        
+    return downloaded_count
+
+def main():
+    parser = argparse.ArgumentParser(description="PodcastThis background daemon & episode scanner")
+    parser.add_argument("--channel", "-c", help="Specific channel URL, channel ID, or channel title to scan")
+    parser.add_argument("--url", "-u", help="Direct channel URL to scan")
+    parser.add_argument("--title", "-t", help="Show/channel title")
+    parser.add_argument("--force", "-f", action="store_true", help="Force sync regardless of battery level")
+    parser.add_argument("--manual", "-m", action="store_true", help="Explicitly trigger full subscriptions sync")
+    parser.add_argument("--check-all", action="store_true", help="Explicitly trigger full subscriptions sync")
+    parser.add_argument("target", nargs="?", default=None, help="Optional positional channel identifier or URL")
+    args = parser.parse_args()
+
+    # Fix ownership of log files if they exist so the mobile app can read/write them if needed
+    for log_file in ["daemon.log", "daemon.err", "sync_status.json"]:
+        log_path = os.path.join(BASE_DIR, log_file)
+        if os.path.exists(log_path):
+            fix_permissions(log_path)
+
+    lock = acquire_lock()
+    if not lock:
+        print("[~] Another sync process is already running. Exiting.", file=sys.stderr)
+        return
+
+    target = args.channel or args.url or args.target
+    given_title = args.title
+
+    state = load_state()
+
+    if target or given_title:
+        # --- Targeted Single Show/Channel Scan ---
+        channel_url = None
+        channel_title = given_title or "Channel"
+        channel_id = None
+        last_seen = None
+
+        # Try to find target in subscriptions
+        for s in state.get("subscriptions", []):
+            s_url = s.get("channel_url", "")
+            s_id = s.get("channel_id", "")
+            s_title = s.get("channel_title", "")
+            if (target and (target == s_url or target == s_id or target.lower() == s_title.lower())) or (given_title and given_title.lower() == s_title.lower()):
+                channel_url = s_url
+                channel_title = s_title
+                channel_id = s_id
+                last_seen = s.get("last_seen_video_id")
+                break
+
+        if not channel_url:
+            if target and (target.startswith("http") or "@" in target or "/channel/" in target or "/c/" in target or "/user/" in target):
+                channel_url = target
+            else:
+                # Search playback_progress for matching channel name to find channel_url
+                search_name = (given_title or target or "").lower()
+                for p in state.get("playback_progress", {}).values():
+                    p_chan = (p.get("channel") or p.get("channel_title") or "").lower()
+                    p_url = p.get("channel_url", "")
+                    if (p_chan == search_name or search_name in p_chan) and p_url:
+                        channel_url = p_url
+                        if not given_title:
+                            channel_title = p.get("channel") or p.get("channel_title")
+                        break
+
+        if not channel_url:
+            print(f"[-] Could not find channel URL for target '{target or given_title}'. Exiting.", file=sys.stderr)
+            update_sync_status("error", f"Could not resolve channel URL for {channel_title}", total=0, is_syncing=False)
+            return
+
+        print(f"[*] Scanning channel '{channel_title}' ({channel_url}) for new episodes at {datetime.now().isoformat()}")
+        downloaded = process_channel(channel_url, channel_title, channel_id, last_seen, 1, 1)
+
+        msg = f"Downloaded {downloaded} new episode(s) from {channel_title}." if downloaded > 0 else f"No new episodes found for {channel_title}."
+        print(f"[*] {msg}")
+        update_sync_status("idle", msg, channel_title=channel_title, total=1, is_syncing=False)
+        return
+
+    # --- Full Subscriptions Sync (On-Demand / Explicit Only) ---
+    if not (args.manual or args.check_all or args.force):
+        print("[*] No target specified and neither --manual nor --check-all flag provided. Skipping subscription scan to preserve battery.")
+        return
+
+    if not args.force:
+        power = get_power_status()
+        lvl = power.get("level")
+        is_charging = power.get("is_charging") or power.get("external_connected")
+        if lvl is not None:
+            print(f"[*] Power status: Battery {lvl}%, Charging: {bool(is_charging)}")
+            if lvl < 25 and not is_charging:
+                msg = f"Battery low ({lvl}%) and not connected to power. Background sync paused to conserve battery."
+                print(f"[*] {msg}")
+                update_sync_status("idle", msg, total=0, is_syncing=False)
+                return
+
+    print(f"[*] Running subscription check at {datetime.now().isoformat()}")
+    subscriptions = [s for s in state.get("subscriptions", []) if s.get("auto_download", True)]
+    total_subs = len(subscriptions)
+    
+    if total_subs == 0:
+        print("[*] No subscribed channels found with auto_download enabled. Exiting.")
+        update_sync_status("idle", "No active subscriptions found.", total=0, is_syncing=False)
+        return
+
+    update_sync_status("checking", f"Checking {total_subs} subscription(s)...", total=total_subs, is_syncing=True)
+    total_downloaded = 0
+
+    for idx, sub in enumerate(subscriptions):
+        channel_title = sub.get("channel_title", "Unknown Channel")
+        channel_url = sub.get("channel_url")
+        channel_id = sub.get("channel_id")
+        last_seen = sub.get("last_seen_video_id")
+
+        cnt = process_channel(channel_url, channel_title, channel_id, last_seen, idx + 1, total_subs)
+        total_downloaded += cnt
+
+    print("[*] Subscription check completed successfully.")
+    update_sync_status(
+        "idle",
+        f"Downloaded {total_downloaded} new episode(s)." if total_downloaded > 0 else "All subscriptions up to date.",
+        total=total_subs,
+        is_syncing=False
+    )
+
+if __name__ == "__main__":
+    main()

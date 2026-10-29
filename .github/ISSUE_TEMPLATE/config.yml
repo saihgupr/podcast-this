@@ -1,0 +1,6 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions / Questions
+    url: https://github.com/saihgupr/podcast-this/issues/new?template=question.md
+    about: Ask a question or get help with setting up PodcastThis.
+

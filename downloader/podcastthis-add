@@ -1,0 +1,939 @@
+#!/usr/bin/env python3
+import os
+import sys
+
+# Ensure jailbreak and standard binary paths are in PATH for subprocesses
+paths_to_add = [
+    "/var/jb/usr/local/bin",
+    "/var/jb/usr/bin",
+    "/var/jb/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin"
+]
+current_path = os.environ.get("PATH", "")
+existing_paths = set(current_path.split(os.pathsep))
+new_paths = [p for p in paths_to_add if p not in existing_paths]
+if new_paths:
+    os.environ["PATH"] = os.pathsep.join(new_paths) + (os.pathsep + current_path if current_path else "")
+
+for cert_path in ["/var/jb/etc/ssl/cert.pem", "/var/jb/etc/ssl/certs/cacert.pem", "/etc/ssl/cert.pem"]:
+    if os.path.exists(cert_path):
+        os.environ["SSL_CERT_FILE"] = cert_path
+        break
+
+import json
+import subprocess
+import argparse
+import time
+import re
+from datetime import datetime, timezone
+
+# Automatically detect running on iOS vs macOS
+if os.path.exists("/var/mobile/Library/Application Support"):
+    BASE_DIR = "/var/mobile/Library/Application Support/PodcastThis"
+else:
+    BASE_DIR = os.path.expanduser("~/Library/Application Support/PodcastThis")
+
+DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
+STATE_FILE = os.path.join(BASE_DIR, "state.json")
+ACTIVE_DOWNLOADS_FILE = os.path.join(BASE_DIR, "active_downloads.json")
+
+def find_python_executable():
+    for path in [
+        "/var/jb/usr/local/bin/python3.12",
+        "/var/jb/usr/bin/python3.12",
+        "/var/jb/usr/bin/python3.11",
+        "/usr/local/bin/python3.12",
+        "/usr/local/bin/python3.11",
+        sys.executable
+    ]:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            if path == sys.executable:
+                if sys.version_info >= (3, 10):
+                    return path
+            else:
+                return path
+    return sys.executable
+
+def get_ytdlp_base_cmd():
+    py = find_python_executable()
+    for ytdlp_path in [
+        "/var/jb/usr/local/lib/yt-dlp",
+        "/var/jb/usr/local/bin/yt-dlp",
+        "/var/jb/usr/bin/yt-dlp",
+        "/usr/local/bin/yt-dlp",
+        os.path.join(os.path.dirname(__file__), "yt-dlp")
+    ]:
+        if os.path.isfile(ytdlp_path):
+            return [py, ytdlp_path]
+            
+    import shutil
+    which_path = shutil.which("yt-dlp")
+    if which_path:
+        return [py, which_path]
+    return [py, "yt-dlp"]
+
+def find_ffmpeg_executable():
+    for path in [
+        "/var/jb/usr/bin/ffmpeg",
+        "/var/jb/usr/local/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "/usr/bin/ffmpeg"
+    ]:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    import shutil
+    return shutil.which("ffmpeg") or "ffmpeg"
+
+def find_ffprobe_executable():
+    for path in [
+        "/var/jb/usr/bin/ffprobe",
+        "/var/jb/usr/local/bin/ffprobe",
+        "/usr/local/bin/ffprobe",
+        "/usr/bin/ffprobe"
+    ]:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    import shutil
+    return shutil.which("ffprobe") or "ffprobe"
+
+def fix_permissions(path):
+    if os.getuid() == 0:  # Running as root
+        try:
+            import pwd
+            mobile_user = pwd.getpwnam("mobile")
+            uid = mobile_user.pw_uid
+            gid = mobile_user.pw_gid
+            os.chown(path, uid, gid)
+        except Exception:
+            try:
+                os.chmod(path, 0o666)
+            except Exception:
+                pass
+
+def setup_directories():
+    os.makedirs(BASE_DIR, exist_ok=True)
+    fix_permissions(BASE_DIR)
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    fix_permissions(DOWNLOADS_DIR)
+    if not os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "w") as f:
+            json.dump({"subscriptions": [], "playback_progress": {}}, f, indent=2)
+    fix_permissions(STATE_FILE)
+
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {"subscriptions": [], "playback_progress": {}}
+    try:
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {"subscriptions": [], "playback_progress": {}}
+
+def save_state(state):
+    try:
+        setup_directories()
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+        fix_permissions(STATE_FILE)
+    except Exception as e:
+        print(f"[-] Error saving state: {e}", file=sys.stderr)
+
+def notify_app_reload():
+    try:
+        subprocess.run(["/var/jb/usr/bin/killall", "-USR1", "PodcastThis"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except Exception:
+        pass
+
+def update_active_download(video_id, data):
+    try:
+        setup_directories()
+        state = {}
+        if os.path.exists(ACTIVE_DOWNLOADS_FILE):
+            try:
+                with open(ACTIVE_DOWNLOADS_FILE, "r") as f:
+                    state = json.load(f)
+            except Exception:
+                state = {}
+        
+        if "active_downloads" not in state:
+            state["active_downloads"] = {}
+            
+        state["active_downloads"][video_id] = data
+        
+        with open(ACTIVE_DOWNLOADS_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+        fix_permissions(ACTIVE_DOWNLOADS_FILE)
+    except Exception as e:
+        print(f"[-] Error updating active download: {e}", file=sys.stderr)
+
+def clear_active_download(video_id):
+    try:
+        if not os.path.exists(ACTIVE_DOWNLOADS_FILE):
+            return
+            
+        state = {}
+        try:
+            with open(ACTIVE_DOWNLOADS_FILE, "r") as f:
+                state = json.load(f)
+        except Exception:
+            return
+            
+        if "active_downloads" in state and video_id in state["active_downloads"]:
+            del state["active_downloads"][video_id]
+            
+        with open(ACTIVE_DOWNLOADS_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+        fix_permissions(ACTIVE_DOWNLOADS_FILE)
+    except Exception as e:
+        print(f"[-] Error clearing active download: {e}", file=sys.stderr)
+
+def format_duration(seconds):
+    if not seconds:
+        return "0:00"
+    m = int(seconds) // 60
+    s = int(seconds) % 60
+    return f"{m}:{s:02d}"
+
+def run_cmd(cmd, check=True):
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=check, errors="replace")
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print(f"[-] Command failed: {' '.join(cmd)}\nError: {e.stderr}", file=sys.stderr)
+        if check:
+            raise
+        return None
+
+def get_channel_title(url):
+    print("[+] Extracting channel metadata...")
+    cmd = get_ytdlp_base_cmd() + [
+        "--js-runtimes", "quickjs",
+        "--no-check-certificates",
+        "--dump-json",
+        "--flat-playlist",
+        "--playlist-end", "1",
+        url
+    ]
+    output = run_cmd(cmd)
+    if output:
+        for line in output.splitlines():
+            try:
+                data = json.loads(line)
+                return data.get("uploader") or data.get("channel") or data.get("playlist_title")
+            except Exception:
+                continue
+    return None
+
+def get_channel_id(url):
+    cmd = get_ytdlp_base_cmd() + [
+        "--js-runtimes", "quickjs",
+        "--no-check-certificates",
+        "--dump-json",
+        "--flat-playlist",
+        "--playlist-end", "1",
+        url
+    ]
+    output = run_cmd(cmd)
+    if output:
+        for line in output.splitlines():
+            try:
+                data = json.loads(line)
+                return data.get("channel_id") or data.get("uploader_id")
+            except Exception:
+                continue
+    return None
+
+def crop_thumbnail_to_square(input_path, output_path):
+    print("[+] Cropping thumbnail to square...")
+    # Center crop to a 1:1 square
+    cmd = [
+        find_ffmpeg_executable(), "-y",
+        "-i", input_path,
+        "-vf", "crop=w='min(iw,ih)':h='min(iw,ih)'",
+        output_path
+    ]
+    run_cmd(cmd)
+
+def get_media_duration(file_path):
+    cmd = [
+        find_ffprobe_executable(),
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        file_path
+    ]
+    try:
+        duration_str = run_cmd(cmd, check=False)
+        if duration_str:
+            return float(duration_str)
+    except Exception as e:
+        print(f"[-] Warning: Failed to read media duration: {e}", file=sys.stderr)
+    return None
+
+def fetch_sponsorblock_segments(video_id):
+    import urllib.request
+    import urllib.parse
+    
+    categories = ["sponsor", "selfpromo", "interaction", "intro", "outro", "preview", "filler"]
+    categories_json = json.dumps(categories)
+    query_params = urllib.parse.urlencode({
+        "videoID": video_id,
+        "categories": categories_json
+    })
+    url = f"https://sponsor.ajay.app/api/skipSegments?{query_params}"
+    
+    print(f"[+] Fetching SponsorBlock segments for {video_id}...")
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode())
+                segments = []
+                for item in data:
+                    segment_range = item.get("segment", [0, 0])
+                    segments.append({
+                        "category": item.get("category"),
+                        "start": float(segment_range[0]),
+                        "end": float(segment_range[1])
+                    })
+                print(f"[+] Found {len(segments)} SponsorBlock segments.")
+                return segments
+    except Exception as e:
+        # SponsorBlock returns 404 if no segments found, which is a normal case
+        print(f"[*] No SponsorBlock segments found (or API error: {e})")
+    return []
+
+def fetch_channel_avatar(channel_url, channel_id):
+    import urllib.request
+    import re
+    
+    print(f"[+] Fetching channel avatar for {channel_id}...")
+    req = urllib.request.Request(channel_url, headers={'User-Agent': 'Mozilla/5.0'})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            html = response.read().decode('utf-8', errors='ignore')
+            # Look for property="og:image" content="..."
+            avatar_url = None
+            og_match = re.search(r'property="og:image" content="([^"]+)"', html)
+            if og_match:
+                avatar_url = og_match.group(1)
+            else:
+                # Fallback to general patterns
+                matches = re.findall(r'https://yt3\.googleusercontent\.com/[a-zA-Z0-9_-]+=[sS]\d+-c-k-c0x00ffffff-no-rj', html)
+                if not matches:
+                    matches = re.findall(r'https://yt3\.googleusercontent\.com/[^\s"\' >]+', html)
+                if matches:
+                    avatar_url = matches[0]
+            
+            if avatar_url:
+                print(f"[+] Found channel avatar URL: {avatar_url}")
+                
+                # Download and save it
+                avatar_path = os.path.join(DOWNLOADS_DIR, f"channel_{channel_id}_art.jpg")
+                avatar_req = urllib.request.Request(avatar_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(avatar_req, timeout=5) as avatar_resp:
+                    with open(avatar_path, "wb") as f:
+                        f.write(avatar_resp.read())
+                fix_permissions(avatar_path)
+                print(f"[+] Channel avatar saved to: {avatar_path}")
+                return True
+    except Exception as e:
+        print(f"[-] Warning: Failed to fetch channel avatar: {e}", file=sys.stderr)
+    return False
+
+def get_video_info(url, pass_num=1):
+    print(f"[+] Extracting video metadata (Pass {pass_num})...")
+    clients = [
+        "android,web",
+        "web,tv,creator",
+        "android,mweb",
+        "mweb,android,ios,web"
+    ]
+    client_arg = clients[(pass_num - 1) % len(clients)]
+    
+    cmd = get_ytdlp_base_cmd() + [
+        "--js-runtimes", "quickjs",
+        "--no-check-certificates",
+        "--extractor-args", f"youtube:player_client={client_arg}",
+        "--dump-json",
+        "--no-playlist",
+        url
+    ]
+    try:
+        info_json = run_cmd(cmd)
+        if info_json:
+            return json.loads(info_json)
+    except Exception as e:
+        print(f"[!] Extractor {client_arg} failed: {e}. Trying generic fallback...", file=sys.stderr)
+        
+    cmd_fallback = get_ytdlp_base_cmd() + [
+        "--js-runtimes", "quickjs",
+        "--no-check-certificates",
+        "--dump-json",
+        "--no-playlist",
+        url
+    ]
+    info_json = run_cmd(cmd_fallback)
+    return json.loads(info_json)
+
+def fetch_video_collaborators(video_id):
+    """
+    Check if video has multiple creators/collaborators from YouTube watch page ytInitialData.
+    Returns list of dicts: [{'title': ..., 'channel_id': ..., 'handle': ..., 'url': ...}]
+    """
+    import urllib.request
+    import re
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as response:
+            html = response.read().decode('utf-8', 'ignore')
+        m = re.search(r'var ytInitialData = ({.*?});</script>', html)
+        if not m:
+            return []
+        data = json.loads(m.group(1))
+        
+        # Look in videoSecondaryInfoRenderer (the primary video info section)
+        sec_info = None
+        contents = data.get("contents", {}).get("twoColumnWatchNextResults", {}).get("results", {}).get("results", {}).get("contents", [])
+        for item in contents:
+            if "videoSecondaryInfoRenderer" in item:
+                sec_info = item["videoSecondaryInfoRenderer"]
+                break
+                
+        if not sec_info and contents:
+            sec_info = contents
+            
+        collabs = []
+        seen_titles = set()
+        
+        def find_collab_dialog(obj):
+            if isinstance(obj, dict):
+                header = obj.get("header", {})
+                headline = header.get("dialogHeaderViewModel", {}).get("headline", {}).get("content", "")
+                if headline == "Collaborators":
+                    items = obj.get("customContent", {}).get("listViewModel", {}).get("listItems", [])
+                    for item in items:
+                        model = item.get("listItemViewModel", {})
+                        title = model.get("title", {}).get("content", "")
+                        subtitle = model.get("subtitle", {}).get("content", "")
+                        on_tap = model.get("rendererContext", {}).get("commandContext", {}).get("onTap", {})
+                        cmd = on_tap.get("innertubeCommand", {})
+                        browse_id = cmd.get("browseEndpoint", {}).get("browseId", "")
+                        url_path = cmd.get("commandMetadata", {}).get("webCommandMetadata", {}).get("url", "")
+                        handle = ""
+                        m_h = re.search(r"(@[a-zA-Z0-9_.-]+)", subtitle)
+                        if m_h:
+                            handle = m_h.group(1)
+                        if title and title not in seen_titles:
+                            seen_titles.add(title)
+                            collabs.append({
+                                "title": title,
+                                "channel_id": browse_id,
+                                "handle": handle,
+                                "url": f"https://www.youtube.com{url_path}" if url_path else (f"https://www.youtube.com/{handle}" if handle else "")
+                            })
+                for v in obj.values():
+                    find_collab_dialog(v)
+            elif isinstance(obj, list):
+                for v in obj:
+                    find_collab_dialog(v)
+
+        if sec_info:
+            find_collab_dialog(sec_info)
+        return collabs
+    except Exception as e:
+        print(f"[*] Note: Failed to fetch video collaborators ({e})")
+        return []
+
+def download_and_process_video(url, max_passes=4, channel_override=None, channel_url_override=None):
+    setup_directories()
+    
+    init_id = "pending_" + str(abs(hash(url)))
+    
+    for pass_num in range(1, max_passes + 1):
+        init_data = {
+            "video_id": init_id,
+            "title": f"Fetching video info... (Pass {pass_num}/{max_passes})" if pass_num > 1 else "Fetching video info...",
+            "channel": url,
+            "status": f"Initializing (Strategy {pass_num}/{max_passes})",
+            "progress": 0.0,
+            "speed": "N/A",
+            "eta": "N/A"
+        }
+        update_active_download(init_id, init_data)
+        notify_app_reload()
+        
+        try:
+            info = get_video_info(url, pass_num)
+        except Exception as e:
+            clear_active_download(init_id)
+            print(f"[-] Pass {pass_num}/{max_passes} failed getting video info: {e}", file=sys.stderr)
+            if pass_num < max_passes:
+                print(f"[!] Retrying video info fetch in 3 seconds... (Pass {pass_num + 1}/{max_passes})")
+                time.sleep(3)
+                continue
+            else:
+                print(f"[-] All {max_passes} attempts failed to fetch video info for {url}", file=sys.stderr)
+                sys.exit(1)
+                
+        clear_active_download(init_id)
+        
+        video_id = info.get("id")
+        title = info.get("title")
+        uploader = info.get("uploader") or "Unknown Channel"
+        channel_id = info.get("channel_id") or info.get("uploader_id") or ""
+        channel_url = info.get("channel_url") or info.get("uploader_url") or ""
+        duration = info.get("duration", 0)
+        description = info.get("description", "")
+        upload_date = info.get("upload_date")
+        
+        # Check for collaborators
+        collabs = fetch_video_collaborators(video_id)
+        if collabs:
+            collab_names = ", ".join([c["title"] for c in collabs if c.get("title")])
+            print(f"[+] Multi-creator collaboration detected with: {collab_names}")
+
+        # Determine effective channel and channel_url
+        if channel_override:
+            effective_channel = channel_override
+            effective_channel_url = channel_url_override or channel_url
+        else:
+            effective_channel = uploader
+            effective_channel_url = channel_url
+            if collabs:
+                state_data = load_state()
+                subs = state_data.get("subscriptions", [])
+                matched_sub = None
+                for c in collabs:
+                    c_title = c.get("title", "").strip().lower()
+                    c_handle = c.get("handle", "").strip().lower().lstrip("@")
+                    c_id = c.get("channel_id", "").strip()
+                    for s in subs:
+                        s_title = s.get("channel_title", "").strip().lower()
+                        s_id = s.get("channel_id", "").strip()
+                        s_url = s.get("channel_url", "").strip().lower()
+                        if (c_title and c_title == s_title) or (c_handle and f"@{c_handle}" in s_url) or (c_id and c_id == s_id):
+                            matched_sub = s
+                            break
+                    if matched_sub:
+                        break
+                if matched_sub:
+                    print(f"[+] Attributing collaborative episode to subscribed channel '{matched_sub['channel_title']}'")
+                    effective_channel = matched_sub["channel_title"]
+                    effective_channel_url = matched_sub.get("channel_url", channel_url)
+        
+        # Format upload_date if available (YYYYMMDD to YYYY-MM-DD)
+        formatted_upload_date = None
+        if upload_date and len(upload_date) == 8:
+            formatted_upload_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
+            
+        print(f"[+] Processing: {title} by {effective_channel} (ID: {video_id})")
+        
+        # Temp file paths
+        temp_audio_path = os.path.join(BASE_DIR, f"temp_{video_id}.m4a")
+        temp_thumb_path = os.path.join(BASE_DIR, f"temp_{video_id}.jpg")
+        square_thumb_path = os.path.join(BASE_DIR, f"temp_{video_id}_sq.jpg")
+        temp_packaged_path = os.path.join(BASE_DIR, f"temp_{video_id}_pkg.m4a")
+        
+        # Final output paths
+        final_filename = f"{video_id}.m4a"
+        final_audio_path = os.path.join(DOWNLOADS_DIR, final_filename)
+        
+        # Initialize active download state
+        progress_data = {
+            "video_id": video_id,
+            "title": title,
+            "channel": effective_channel,
+            "status": "Starting download...",
+            "progress": 0.0,
+            "speed": "0 KiB/s",
+            "eta": "--:--"
+        }
+        update_active_download(video_id, progress_data)
+        notify_app_reload()
+        
+        # Clean up any leftover temp files from prior aborted passes
+        for temp_file in [temp_audio_path, temp_thumb_path, square_thumb_path, temp_packaged_path]:
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception:
+                    pass
+        
+        try:
+            state = load_state()
+            settings = state.get("settings", {})
+            sb_enabled = settings.get("sponsorblock_enabled", False)
+            sb_categories = settings.get("sponsorblock_categories", ["sponsor", "selfpromo", "interaction", "intro", "outro", "preview", "filler"])
+            
+            if sb_enabled:
+                print(f"[+] SponsorBlock enabled. Categories to remove: {', '.join(sb_categories)}")
+            
+            # Safe filename
+            safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c in " _-"]).rstrip()
+            if not safe_title:
+                safe_title = video_id
+                
+            # 1. Download audio with pass-specific strategy
+            print(f"[+] Downloading audio track... (Pass {pass_num}/{max_passes})")
+            
+            clients = ["android,web", "web,tv,creator", "android,mweb", "mweb,android,ios,web"]
+            client = clients[(pass_num - 1) % len(clients)]
+            
+            if pass_num == 1:
+                cmd_download = get_ytdlp_base_cmd() + [
+                    "--js-runtimes", "quickjs",
+                    "--no-check-certificates",
+                    "--extractor-args", f"youtube:player_client={client}",
+                    "-f", "bestaudio[ext=m4a]/bestaudio/ba/b",
+                    "-o", temp_audio_path,
+                    "--no-playlist",
+                    url
+                ]
+            elif pass_num == 2:
+                cmd_download = get_ytdlp_base_cmd() + [
+                    "--js-runtimes", "quickjs",
+                    "--no-check-certificates",
+                    "--extractor-args", f"youtube:player_client={client}",
+                    "-f", "bestaudio/ba/b",
+                    "-o", temp_audio_path,
+                    "--no-playlist",
+                    url
+                ]
+            elif pass_num == 3:
+                cmd_download = get_ytdlp_base_cmd() + [
+                    "--js-runtimes", "quickjs",
+                    "--no-check-certificates",
+                    "--extractor-args", f"youtube:player_client={client}",
+                    "-x", "--audio-format", "m4a", "--audio-quality", "0",
+                    "-o", temp_audio_path,
+                    "--no-playlist",
+                    url
+                ]
+            else:
+                cmd_download = get_ytdlp_base_cmd() + [
+                    "--js-runtimes", "quickjs",
+                    "--no-check-certificates",
+                    "-f", "ba/b/best",
+                    "-o", temp_audio_path,
+                    "--no-playlist",
+                    url
+                ]
+            
+            progress_data["status"] = f"Downloading (Strategy {pass_num})"
+            update_active_download(video_id, progress_data)
+            
+            process = subprocess.Popen(cmd_download, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, errors="replace")
+            
+            pct_re = re.compile(r'\[download\]\s+(\d+(?:\.\d+)?)%')
+            spd_re = re.compile(r'at\s+([^\s]+)')
+            eta_re = re.compile(r'ETA\s+([^\s]+)')
+            
+            for line in process.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                
+                pct_match = pct_re.search(line)
+                spd_match = spd_re.search(line)
+                eta_match = eta_re.search(line)
+                
+                updated = False
+                if pct_match:
+                    try:
+                        progress_data["progress"] = float(pct_match.group(1))
+                        updated = True
+                    except Exception:
+                        pass
+                if spd_match:
+                    progress_data["speed"] = spd_match.group(1)
+                    updated = True
+                if eta_match:
+                    progress_data["eta"] = eta_match.group(1)
+                    updated = True
+                    
+                if updated:
+                    update_active_download(video_id, progress_data)
+                    
+            process.wait()
+            if process.returncode != 0:
+                raise RuntimeError(f"yt-dlp download failed with exit code {process.returncode}")
+                
+            # Find the downloaded thumbnail
+            thumbnail_url = info.get("thumbnail")
+            if thumbnail_url:
+                print("[+] Fetching thumbnail image...")
+                try:
+                    import urllib.request
+                    req = urllib.request.Request(thumbnail_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        with open(temp_thumb_path, "wb") as f:
+                            f.write(response.read())
+                except Exception as e:
+                    print(f"[-] Failed to download thumbnail: {e}", file=sys.stderr)
+            
+            # 2. Crop thumbnail to square if it exists
+            has_art = False
+            if os.path.exists(temp_thumb_path):
+                try:
+                    crop_thumbnail_to_square(temp_thumb_path, square_thumb_path)
+                    if os.path.exists(square_thumb_path):
+                        has_art = True
+                except Exception as e:
+                    print(f"[-] Warning: Failed to crop thumbnail: {e}", file=sys.stderr)
+            
+            # 3. Combine audio, square artwork, and metadata using ffmpeg
+            print("[+] Packaging audio with artwork and metadata tags...")
+            
+            progress_data["status"] = "Processing audio"
+            progress_data["progress"] = 100.0
+            progress_data["speed"] = "N/A"
+            progress_data["eta"] = "N/A"
+            update_active_download(video_id, progress_data)
+            
+            # Locate actual audio input file
+            actual_audio_input = temp_audio_path
+            if not os.path.exists(actual_audio_input):
+                base_without_ext = os.path.splitext(temp_audio_path)[0]
+                for ext in [".m4a", ".webm", ".opus", ".mp3", ".aac", ".ogg", ".mp4", ".mkv"]:
+                    candidate = base_without_ext + ext
+                    if os.path.exists(candidate):
+                        actual_audio_input = candidate
+                        break
+            
+            if not os.path.exists(actual_audio_input):
+                raise RuntimeError(f"Downloaded audio file was not found at {temp_audio_path}")
+
+            ffmpeg_bin = find_ffmpeg_executable()
+
+            artist_tag = effective_channel
+            if collabs:
+                collab_titles = [c["title"] for c in collabs if c.get("title")]
+                if collab_titles:
+                    artist_tag = " & ".join(collab_titles)
+
+            # Try fast stream copy first
+            cmd_package_copy = [ffmpeg_bin, "-y", "-i", actual_audio_input]
+            if has_art:
+                cmd_package_copy += ["-i", square_thumb_path]
+            cmd_package_copy += ["-map", "0:a"]
+            if has_art:
+                cmd_package_copy += ["-map", "1:0", "-disposition:v:0", "attached_pic"]
+            cmd_package_copy += ["-c:a", "copy"]
+            if has_art:
+                cmd_package_copy += ["-c:v", "copy"]
+            cmd_package_copy += [
+                "-metadata", f"title={title}",
+                "-metadata", f"artist={artist_tag}",
+                "-metadata", f"album={effective_channel}",
+                "-metadata", f"comment=YouTube Video ID: {video_id}\n\n{description}",
+                temp_packaged_path
+            ]
+            
+            package_success = False
+            try:
+                run_cmd(cmd_package_copy)
+                package_success = os.path.exists(temp_packaged_path) and os.path.getsize(temp_packaged_path) > 0
+            except Exception as e:
+                print(f"[!] Stream copy packaging failed ({e}). Falling back to AAC re-encode...", file=sys.stderr)
+
+            if not package_success:
+                # Transcode audio to high-quality AAC
+                cmd_package_encode = [ffmpeg_bin, "-y", "-i", actual_audio_input]
+                if has_art:
+                    cmd_package_encode += ["-i", square_thumb_path]
+                cmd_package_encode += ["-map", "0:a"]
+                if has_art:
+                    cmd_package_encode += ["-map", "1:0", "-disposition:v:0", "attached_pic"]
+                cmd_package_encode += ["-c:a", "aac", "-b:a", "192k"]
+                if has_art:
+                    cmd_package_encode += ["-c:v", "copy"]
+                cmd_package_encode += [
+                    "-metadata", f"title={title}",
+                    "-metadata", f"artist={artist_tag}",
+                    "-metadata", f"album={effective_channel}",
+                    "-metadata", f"comment=YouTube Video ID: {video_id}\n\n{description}",
+                    temp_packaged_path
+                ]
+                run_cmd(cmd_package_encode)
+
+            # 3b. Read actual duration of packaged file
+            actual_duration = get_media_duration(temp_packaged_path)
+            if actual_duration is not None:
+                duration = actual_duration
+                print(f"[+] Actual processed duration: {duration}s")
+
+            # 4. Save sidecar artwork for fast app loading
+            art_sidecar_path = os.path.join(DOWNLOADS_DIR, f"{video_id}_art.jpg")
+            if has_art and os.path.exists(square_thumb_path):
+                import shutil
+                try:
+                    shutil.copyfile(square_thumb_path, art_sidecar_path)
+                    fix_permissions(art_sidecar_path)
+                except Exception as e:
+                    print(f"[-] Warning: Failed to save sidecar artwork: {e}", file=sys.stderr)
+
+            # 5. Atomically move finished file into downloads directory
+            if os.path.exists(final_audio_path):
+                os.remove(final_audio_path)
+            os.rename(temp_packaged_path, final_audio_path)
+            fix_permissions(final_audio_path)
+            
+            # Fetch channel avatar in background if channel_id is available
+            if effective_channel_url and channel_id:
+                try:
+                    fetch_channel_avatar(effective_channel_url, channel_id)
+                except Exception as e:
+                    print(f"[-] Warning: Failed to fetch channel avatar: {e}", file=sys.stderr)
+
+            # Fetch SponsorBlock segments
+            sb_segments = fetch_sponsorblock_segments(video_id)
+
+            # 6. Update state.json with new episode entry
+            print("[+] Updating library state...")
+            state = load_state()
+            if "playback_progress" not in state:
+                state["playback_progress"] = {}
+                
+            episode_data = {
+                "title": title,
+                "channel": effective_channel,
+                "channel_url": effective_channel_url,
+                "duration": duration,
+                "last_position": 0.0,
+                "position": 0.0,
+                "completed": False,
+                "last_played": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "date_added": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "filename": final_filename,
+                "video_id": video_id,
+                "segments": sb_segments
+            }
+            if formatted_upload_date:
+                episode_data["upload_date"] = formatted_upload_date
+            if collabs:
+                episode_data["collaborators"] = [c["title"] for c in collabs if c.get("title")]
+                
+            state["playback_progress"][video_id] = episode_data
+            save_state(state)
+            
+            # 7. Clean up temp files
+            for temp_file in [temp_audio_path, temp_thumb_path, square_thumb_path, temp_packaged_path, actual_audio_input]:
+                if os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except Exception:
+                        pass
+                        
+            # Clean up active download tracking
+            clear_active_download(video_id)
+            notify_app_reload()
+            
+            print(f"[+] Successfully added '{title}' to PodcastThis library!")
+            return
+            
+        except Exception as e:
+            print(f"[-] Pass {pass_num}/{max_passes} failed during download/packaging: {e}", file=sys.stderr)
+            # Cleanup temp files for next pass
+            for temp_file in [temp_audio_path, temp_thumb_path, square_thumb_path, temp_packaged_path]:
+                if os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except Exception:
+                        pass
+                        
+            if pass_num < max_passes:
+                print(f"[!] Retrying with alternative extraction strategy in 3 seconds... (Pass {pass_num + 1}/{max_passes})")
+                time.sleep(3)
+            else:
+                clear_active_download(video_id)
+                notify_app_reload()
+                print(f"[-] All {max_passes} attempts failed for {url}", file=sys.stderr)
+                sys.exit(1)
+
+def get_videos_tab_url(url):
+    if any(x in url for x in ["/channel/", "/c/", "/user/", "@"]):
+        base_url = url.split('?')[0].split('#')[0].rstrip('/')
+        if base_url.endswith('/shorts'):
+            base_url = base_url[:-7] + '/videos'
+        elif base_url.endswith('/streams'):
+            base_url = base_url[:-8] + '/videos'
+        elif not base_url.endswith('/videos'):
+            base_url = f"{base_url}/videos"
+        
+        suffix_idx = len(url.split('?')[0].split('#')[0].rstrip('/'))
+        url = base_url + url[suffix_idx:]
+    return url
+
+def subscribe_to_channel(url, max_passes=3):
+    setup_directories()
+    url = get_videos_tab_url(url)
+    
+    for pass_num in range(1, max_passes + 1):
+        try:
+            print(f"[+] Extracting channel metadata... (Pass {pass_num}/{max_passes})")
+            cmd = get_ytdlp_base_cmd() + ["--dump-json", "--playlist-items", "1", url]
+            channel_info_raw = run_cmd(cmd)
+            channel_info = json.loads(channel_info_raw.splitlines()[0])
+            
+            channel_id = channel_info.get("channel_id")
+            channel_title = channel_info.get("uploader")
+            channel_url = channel_info.get("channel_url", url)
+            
+            if not channel_id or not channel_title:
+                raise RuntimeError("Could not parse channel info from yt-dlp response.")
+                
+            print(f"[+] Subscribing to: {channel_title} ({channel_id})")
+            
+            if channel_url:
+                fetch_channel_avatar(channel_url, channel_id)
+                
+            state = load_state()
+            existing = [s for s in state["subscriptions"] if s["channel_id"] == channel_id]
+            if existing:
+                print("[*] Already subscribed to this channel.")
+                return
+                
+            latest_video_id = channel_info.get("id")
+            
+            state["subscriptions"].append({
+                "channel_id": channel_id,
+                "channel_title": channel_title,
+                "channel_url": channel_url,
+                "auto_download": True,
+                "date_subscribed": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "last_seen_video_id": latest_video_id
+            })
+            save_state(state)
+            notify_app_reload()
+            print("[+] Subscription saved.")
+            return
+        except Exception as e:
+            print(f"[-] Subscription pass {pass_num}/{max_passes} failed: {e}", file=sys.stderr)
+            if pass_num < max_passes:
+                print(f"[!] Retrying channel subscription in 3 seconds... (Pass {pass_num + 1}/{max_passes})")
+                time.sleep(3)
+            else:
+                print(f"[-] All {max_passes} subscription passes failed for channel {url}", file=sys.stderr)
+                sys.exit(1)
+
+def main():
+    parser = argparse.ArgumentParser(description="PodcastThis on-device downloader CLI")
+    parser.add_argument("url", help="YouTube video or channel URL")
+    parser.add_argument("--subscribe", action="store_true", help="Subscribe to the channel instead of downloading a single video")
+    parser.add_argument("--channel", help="Specific channel/show title to attribute this video to")
+    parser.add_argument("--channel-url", help="Specific channel URL to attribute this video to")
+    args = parser.parse_args()
+    
+    if args.subscribe or "channel" in args.url or "playlist" in args.url or "@" in args.url:
+        if args.subscribe or any(x in args.url for x in ["/channel/", "/c/", "/user/", "@"]):
+            subscribe_to_channel(args.url)
+        else:
+            download_and_process_video(args.url, channel_override=args.channel, channel_url_override=args.channel_url)
+    else:
+        download_and_process_video(args.url, channel_override=args.channel, channel_url_override=args.channel_url)
+
+if __name__ == "__main__":
+    main()
