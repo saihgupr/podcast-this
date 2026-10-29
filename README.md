@@ -86,6 +86,17 @@ To enable AI speaker diarization and per-speaker skipping, run the companion Fas
 * Jailbroken device running iOS 14.0 or newer (tested on iOS 15 and 16, rootless jailbreaks supported)
 * Dependencies: `python3` and `ffmpeg` (installed automatically by your package manager)
 
+### Install via Sileo / Zebra (recommended)
+
+Add the PodcastThis Repo to your package manager of choice:
+
+- **Repository URL:** `https://saihgupr.github.io/podcast-this/`
+
+- **Sileo:** `sileo://source/https://saihgupr.github.io/podcast-this/`
+- **Zebra:** `zbra://sources/add/https://saihgupr.github.io/podcast-this/`
+
+Once added, search for **PodcastThis** and tap Install.
+
 ### Install via .deb
 1. Download the latest `com.saihgupr.podcastthis_*.deb` from [GitHub Releases](https://github.com/saihgupr/podcast-this/releases).
 2. Open the file in **Sileo** or **Zebra** to install, or copy it to your device and run `dpkg -i <file>.deb` as root over SSH.
