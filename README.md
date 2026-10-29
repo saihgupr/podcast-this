@@ -104,6 +104,53 @@ Once added, search for **PodcastThis** and tap Install.
 
 ---
 
+## Command Line (SSH)
+
+Two helper commands ship with the package in `/var/jb/usr/local/bin` (or `/usr/local/bin` on rootful jailbreaks).
+
+### `podcastthis-add <url>`
+
+Queues a YouTube video or channel for download without opening the app. It fetches metadata, downloads the audio, embeds square artwork and tags, applies SponsorBlock segments, and writes the episode into the library.
+
+```bash
+podcastthis-add "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+podcastthis-add "https://www.youtube.com/@SomeChannel" --subscribe
+```
+
+| Flag | Description |
+|---|---|
+| `--subscribe` | Subscribe to the channel instead of downloading one video. |
+| `--channel <title>` | Attribute the video to a specific show title. |
+| `--channel-url <url>` | Attribute the video to a specific channel URL. |
+
+A channel URL passed without `--subscribe` is treated as a subscription, since a bare channel link has no single video to download.
+
+### `podcastthis-daemon`
+
+Runs the same subscription scanner the background launchd job uses. Useful for checking for new episodes on demand.
+
+```bash
+podcastthis-daemon --manual        # Scan all subscribed channels (respects battery rules)
+podcastthis-daemon --force         # Scan now, ignoring the 25% battery floor
+podcastthis-daemon --channel "Some Channel"
+podcastthis-daemon -u "https://www.youtube.com/@SomeChannel"
+```
+
+| Flag | Description |
+|---|---|
+| `-c`, `--channel <target>` | Scan one show by title, channel ID, or channel URL. |
+| `-u`, `--url <url>` | Scan one channel by URL. |
+| `-t`, `--title <title>` | Show title to use when resolving the channel. |
+| `-m`, `--manual` | Trigger a full subscriptions sync. |
+| `--check-all` | Same as `--manual`. |
+| `-f`, `--force` | Run even when the battery is below 25% and unplugged. |
+
+With no target and no `--manual` / `--check-all` flag the daemon exits without scanning, to avoid battery drain.
+
+Logs and status live next to the library data at `/var/mobile/Library/Application Support/PodcastThis/` (`state.json`, `daemon.log`, `sync_status.json`).
+
+---
+
 ## Building from Source
 
 Requires macOS or Linux with [Theos](https://theos.dev):
