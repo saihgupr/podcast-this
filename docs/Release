@@ -1,0 +1,19 @@
+Origin: PodcastThis Repo
+Label: PodcastThis
+Icon: https://saihgupr.github.io/podcast-this/CydiaIcon.png
+Suite: stable
+Version: 1.0
+Codename: ios
+Components: main
+Architectures: iphoneos-arm iphoneos-arm64
+Description: PodcastThis — Convert YouTube videos and channels into offline audio-only podcasts natively on-device.
+MD5Sum:
+ be0b13de30b51d23e480c38e454fa333 1118 Packages
+ 945f678459282ad5b102d04c2780698b 526 Packages.gz
+ 37baaf8f505dbcb7a57c67d104bdefc3 614 Packages.bz2
+ 1efa838b0b232ca3eaba565fe4914c5f 509 Packages.zst
+SHA256:
+ 515de1b95d511c0621c7939bdf5fb4b6edd691092eb9f85d0c615de8273f9b94 1118 Packages
+ e95ddcd907a5068853df704421f58832200e3b33d1a0ca1f0c29c7e878ae7519 526 Packages.gz
+ 2dff4d9d6042d3a9f1509490ae3d34a23d40f4e7005439d1c9ad213538c8d830 614 Packages.bz2
+ 3acb799764a6ad5107fa5eb6bdce8a673c22acdad45419c1bc6ee4750d1bc9dc 509 Packages.zst

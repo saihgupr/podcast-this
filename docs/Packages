@@ -1,0 +1,32 @@
+Package: com.saihgupr.podcastthis
+Name: PodcastThis
+Depends: firmware (>= 14.0), python3, ffmpeg
+Description: Convert YouTube videos and channels into offline audio-only podcasts natively on-device.
+Maintainer: saihgupr
+Author: saihgupr
+Section: Multimedia
+Architecture: iphoneos-arm64
+Version: 1.0.0
+Installed-Size: 10440
+Filename: ./com.saihgupr.podcastthis_1.0.0_iphoneos-arm64.deb
+Size: 5315814
+MD5sum: 3bd2b0a6dfec527f437abe51630a1fde
+SHA1: 03a0aed929730888c0b683c71462821f44d3f80a
+SHA256: f78a596563e74fb3e33484d35d98f370368cb7873fc90df099467550c95c677d
+
+Package: com.saihgupr.podcastthis
+Name: PodcastThis
+Depends: firmware (>= 14.0), python3, ffmpeg
+Description: Convert YouTube videos and channels into offline audio-only podcasts natively on-device.
+Maintainer: saihgupr
+Author: saihgupr
+Section: Multimedia
+Architecture: iphoneos-arm
+Version: 1.0.0
+Installed-Size: 10468
+Filename: ./com.saihgupr.podcastthis_1.0.0_iphoneos-arm.deb
+Size: 5324984
+MD5sum: 73f602158b3613ba3d48b7b8f34e0aaf
+SHA1: 59e151ec1ceb1e4963c8e9f44ae5afbf6582c99f
+SHA256: a3db51800ce5d431b4c2047ee52f02334994fca2bd24fe8ac9ec3854c0ac12b0
+
