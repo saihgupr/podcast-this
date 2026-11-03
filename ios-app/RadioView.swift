@@ -7,6 +7,8 @@ struct RadioView: View {
 
     @State private var showingAddSheet = false
     @State private var editingStation: RadioStation? = nil
+    @State private var stationToDelete: RadioStation? = nil
+    @State private var confirmDelete = false
     @State private var stationName = ""
     @State private var stationURL = ""
 
@@ -56,10 +58,18 @@ struct RadioView: View {
                                     } label: {
                                         Label("Edit", systemImage: "pencil")
                                     }
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        stationToDelete = station
+                                        confirmDelete = true
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
                                 }
                                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                     Button(role: .destructive) {
-                                        deleteStation(station)
+                                        stationToDelete = station
+                                        confirmDelete = true
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
@@ -97,9 +107,22 @@ struct RadioView: View {
                 }
             }
             .sheet(item: $editingStation) { station in
-                stationFormSheet(title: "Edit Station") {
+                stationFormSheet(title: "Edit Station", station: station) {
                     store.updateStation(station, name: stationName.trimmingCharacters(in: .whitespacesAndNewlines), url: stationURL.trimmingCharacters(in: .whitespacesAndNewlines))
                 }
+            }
+            .confirmationDialog(
+                "Delete \"\(stationToDelete?.name ?? "")\"?",
+                isPresented: $confirmDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Station", role: .destructive) {
+                    if let station = stationToDelete { deleteStation(station) }
+                    stationToDelete = nil
+                }
+                Button("Cancel", role: .cancel) { stationToDelete = nil }
+            } message: {
+                Text("This removes the station from your Radio list. It does not affect downloads.")
             }
         }
     }
@@ -137,12 +160,18 @@ struct RadioView: View {
 
     private func deleteStations(at offsets: IndexSet) {
         let toDelete = offsets.map { store.stations[$0] }
+        if toDelete.count == 1, let station = toDelete.first {
+            stationToDelete = station
+            confirmDelete = true
+            return
+        }
         for station in toDelete {
-            deleteStation(station)
+            if radio.currentStation?.id == station.id { radio.stop() }
+            store.deleteStation(station)
         }
     }
 
-    private func stationFormSheet(title: String, onSave: @escaping () -> Void) -> some View {
+    private func stationFormSheet(title: String, station: RadioStation? = nil, onSave: @escaping () -> Void) -> some View {
         NavigationView {
             Form {
                 Section(header: Text("Station")) {
@@ -152,6 +181,18 @@ struct RadioView: View {
                         .keyboardType(.URL)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
+                }
+                if let station {
+                    Section {
+                        Button(role: .destructive) {
+                            editingStation = nil
+                            stationToDelete = station
+                            confirmDelete = true
+                        } label: {
+                            Label("Delete Station", systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
                 }
             }
             .navigationTitle(title)
