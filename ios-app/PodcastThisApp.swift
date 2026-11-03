@@ -49,6 +49,12 @@ struct MainTabView: View {
                     }
                     .tag(1)
 
+                RadioView()
+                    .tabItem {
+                        Label("Radio", systemImage: "radio.fill")
+                    }
+                    .tag(4)
+
                 AddView()
                     .tabItem {
                         Label("Add", systemImage: "plus.circle")

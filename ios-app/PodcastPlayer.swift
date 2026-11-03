@@ -108,6 +108,10 @@ public class PodcastPlayer: NSObject, ObservableObject {
     }
     
     public func play(episode: PodcastEpisode, autoPlay: Bool = true) {
+        // Stop live radio first so streams never overlap with episodes.
+        if RadioPlayer.shared.isPlaying || RadioPlayer.shared.currentStation != nil {
+            RadioPlayer.shared.stop()
+        }
         // Ensure audio session is active
         activateAudioSessionIfNeeded()
         
