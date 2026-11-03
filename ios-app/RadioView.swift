@@ -40,44 +40,42 @@ struct RadioView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
-                        Section(footer: Text("Streams play live and are not downloaded.")) {
-                            ForEach(store.stations) { station in
-                                RadioStationRow(
-                                    station: station,
-                                    isCurrent: radio.currentStation?.id == station.id,
-                                    isPlaying: radio.isPlaying,
-                                    isLoading: radio.isLoading
-                                )
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    radio.toggle(station: station)
+                        ForEach(store.stations) { station in
+                            RadioStationRow(
+                                station: station,
+                                isCurrent: radio.currentStation?.id == station.id,
+                                isPlaying: radio.isPlaying,
+                                isLoading: radio.isLoading
+                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                radio.toggle(station: station)
+                            }
+                            .contextMenu {
+                                Button {
+                                    startEditing(station)
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
                                 }
-                                .contextMenu {
-                                    Button {
-                                        startEditing(station)
-                                    } label: {
-                                        Label("Edit", systemImage: "pencil")
-                                    }
-                                    Divider()
-                                    Button(role: .destructive) {
-                                        stationToDelete = station
-                                        confirmDelete = true
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
-                                        stationToDelete = station
-                                        confirmDelete = true
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
+                                Divider()
+                                Button(role: .destructive) {
+                                    stationToDelete = station
+                                    confirmDelete = true
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
                                 }
                             }
-                            .onDelete(perform: deleteStations)
-                            .onMove(perform: store.moveStation)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    stationToDelete = station
+                                    confirmDelete = true
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
+                        .onDelete(perform: deleteStations)
+                        .onMove(perform: store.moveStation)
                     }
                     .listStyle(InsetGroupedListStyle())
                     .padding(.bottom, (podcastPlayer.currentEpisode != nil || radio.currentStation != nil) ? 90 : 0)
