@@ -30,6 +30,7 @@ enum LibraryLayoutMode: String, CaseIterable {
 struct LibraryView: View {
     @ObservedObject var dataManager = DataManager.shared
     @ObservedObject var player = PodcastPlayer.shared
+    @ObservedObject var radio = RadioPlayer.shared
     @Binding var showFullPlayer: Bool
     @State private var showToDelete: PodcastShow? = nil
     @State private var confirmDeleteShow = false
@@ -152,7 +153,7 @@ struct LibraryView: View {
                         }
                         .environment(\.editMode, isReordering ? .constant(.active) : .constant(.inactive))
                         .listStyle(PlainListStyle())
-                        .padding(.bottom, player.currentEpisode != nil ? 90 : 0)
+                        .padding(.bottom, (player.currentEpisode != nil || radio.currentStation != nil) ? 90 : 0)
                         .refreshable {
                             guard !isReordering else { return }
                             await dataManager.syncSubscriptionsAsync()
@@ -194,7 +195,7 @@ struct LibraryView: View {
                             }
                             .padding(.horizontal, layoutMode == .grid3 ? 12 : 16)
                             .padding(.top, 8)
-                            .padding(.bottom, player.currentEpisode != nil ? 90 : 20)
+                            .padding(.bottom, (player.currentEpisode != nil || radio.currentStation != nil) ? 90 : 20)
                         }
                     }
                 }
@@ -525,6 +526,7 @@ struct ShowDetailView: View {
     let show: PodcastShow
     @Binding var showFullPlayer: Bool
     @ObservedObject var player = PodcastPlayer.shared
+    @ObservedObject var radio = RadioPlayer.shared
     @ObservedObject var dataManager = DataManager.shared
     @State private var headerArtwork: UIImage? = nil
     @State private var sortOrder: SortOrder = .recentlyAdded
@@ -672,7 +674,7 @@ struct ShowDetailView: View {
                 }
             }
             .listStyle(PlainListStyle())
-            .padding(.bottom, player.currentEpisode != nil ? 90 : 0)
+            .padding(.bottom, (player.currentEpisode != nil || radio.currentStation != nil) ? 90 : 0)
             .refreshable {
                 await dataManager.loadDataAsync()
             }
@@ -1067,41 +1069,66 @@ struct ArtworkView: View {
 
 struct MiniPlayerBar: View {
     @ObservedObject var player = PodcastPlayer.shared
+    @ObservedObject var radio = RadioPlayer.shared
     @Binding var showFullPlayer: Bool
     @State private var artwork: UIImage? = nil
 
     var body: some View {
+        let isRadio = player.currentEpisode == nil && radio.currentStation != nil
         VStack(spacing: 0) {
-            // Progress line
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(Color(.systemFill)).frame(height: 2)
-                    Rectangle()
-                        .fill(PodcastTheme.accent)
-                        .frame(width: player.duration > 0 ? geo.size.width * (player.currentTime / player.duration) : 0, height: 2)
+            // Progress line (podcasts only)
+            if !isRadio {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(Color(.systemFill)).frame(height: 2)
+                        Rectangle()
+                            .fill(PodcastTheme.accent)
+                            .frame(width: player.duration > 0 ? geo.size.width * (player.currentTime / player.duration) : 0, height: 2)
+                    }
                 }
+                .frame(height: 2)
             }
-            .frame(height: 2)
 
             HStack(spacing: 12) {
-                ArtworkView(image: artwork, size: 44)
+                ArtworkView(image: isRadio ? nil : artwork, size: 44)
                     .cornerRadius(8)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(player.currentEpisode?.title ?? "")
-                        .font(.subheadline).fontWeight(.semibold).lineLimit(1)
-                    Text(player.currentEpisode?.channel ?? "")
-                        .font(.caption).foregroundColor(.secondary).lineLimit(1)
+                    if isRadio {
+                        Text(radio.currentStation?.name ?? "Radio")
+                            .font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Text("Live")
+                            .font(.caption).foregroundColor(.secondary).lineLimit(1)
+                    } else {
+                        Text(player.currentEpisode?.title ?? "")
+                            .font(.subheadline).fontWeight(.semibold).lineLimit(1)
+                        Text(player.currentEpisode?.channel ?? "")
+                            .font(.caption).foregroundColor(.secondary).lineLimit(1)
+                    }
                 }
 
                 Spacer()
 
                 HStack(spacing: 20) {
-                    Button { player.skipForward() } label: {
-                        Image(systemName: "goforward.\(Int(DataManager.shared.settings.skipDuration))").font(.system(size: 20))
-                    }
-                    Button { player.togglePlay() } label: {
-                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 22))
+                    if isRadio {
+                        Button { radio.stop() } label: {
+                            Image(systemName: "square.stop.fill").font(.system(size: 20))
+                        }
+                        if radio.isLoading {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: PodcastTheme.accent))
+                        } else {
+                            Button { if let s = radio.currentStation { radio.toggle(station: s) } } label: {
+                                Image(systemName: radio.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 22))
+                            }
+                        }
+                    } else {
+                        Button { player.skipForward() } label: {
+                            Image(systemName: "goforward.\(Int(DataManager.shared.settings.skipDuration))").font(.system(size: 20))
+                        }
+                        Button { player.togglePlay() } label: {
+                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 22))
+                        }
                     }
                 }
                 .foregroundColor(.primary)

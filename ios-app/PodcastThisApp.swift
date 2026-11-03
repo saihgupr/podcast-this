@@ -19,6 +19,7 @@ struct PodcastThisApp: App {
 
 struct MainTabView: View {
     @ObservedObject var player = PodcastPlayer.shared
+    @ObservedObject var radio = RadioPlayer.shared
     @State private var showFullPlayer = false
     @State private var selectedTab = 0
 
@@ -70,14 +71,14 @@ struct MainTabView: View {
             .accentColor(PodcastTheme.accent)
 
             // Sticky mini player sits above the tab bar
-            if player.currentEpisode != nil {
+            if player.currentEpisode != nil || radio.currentStation != nil {
                 VStack(spacing: 0) {
                     MiniPlayerBar(showFullPlayer: $showFullPlayer)
                     // Spacer for the native tab bar height
                     Color.clear.frame(height: 49)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: player.currentEpisode != nil)
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: player.currentEpisode != nil || radio.currentStation != nil)
                 // Stay pinned at bottom — never move up with keyboard
                 .ignoresSafeArea(.keyboard)
             }

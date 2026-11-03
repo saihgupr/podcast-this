@@ -10,6 +10,7 @@ struct ChannelBrowserView: View {
     @State private var canLoadMore = true
     @ObservedObject var dataManager = DataManager.shared
     @ObservedObject var player = PodcastPlayer.shared
+    @ObservedObject var radio = RadioPlayer.shared
     @Environment(\.dismiss) var dismiss
     
     var body: some View {
@@ -129,7 +130,7 @@ struct ChannelBrowserView: View {
                     }
                 }
                 .listStyle(InsetGroupedListStyle())
-                .padding(.bottom, player.currentEpisode != nil ? 90 : 0)
+                .padding(.bottom, (player.currentEpisode != nil || radio.currentStation != nil) ? 90 : 0)
             }
         }
         .navigationTitle(initialTitle.isEmpty ? "Channel" : initialTitle)

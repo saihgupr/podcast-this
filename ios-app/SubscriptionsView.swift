@@ -3,6 +3,7 @@ import SwiftUI
 struct SubscriptionsView: View {
     @ObservedObject var dataManager = DataManager.shared
     @ObservedObject var player = PodcastPlayer.shared
+    @ObservedObject var radio = RadioPlayer.shared
     @State private var subToDelete: Subscription? = nil
     @State private var confirmDeleteSub = false
 
@@ -80,7 +81,7 @@ struct SubscriptionsView: View {
                             await dataManager.syncSubscriptionsAsync()
                             await dataManager.loadDataAsync()
                         }
-                        .padding(.bottom, player.currentEpisode != nil ? 90 : 0)
+                        .padding(.bottom, (player.currentEpisode != nil || radio.currentStation != nil) ? 90 : 0)
                     }
                 }
             }

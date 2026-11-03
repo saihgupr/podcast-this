@@ -80,7 +80,7 @@ struct RadioView: View {
                         }
                     }
                     .listStyle(InsetGroupedListStyle())
-                    .padding(.bottom, podcastPlayer.currentEpisode != nil ? 90 : 0)
+                    .padding(.bottom, (podcastPlayer.currentEpisode != nil || radio.currentStation != nil) ? 90 : 0)
                 }
             }
             .navigationTitle("Radio")

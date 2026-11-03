@@ -5,6 +5,7 @@ import AVFoundation
 
 struct FullPlayerView: View {
     @ObservedObject var player = PodcastPlayer.shared
+    @ObservedObject var radio = RadioPlayer.shared
     @ObservedObject var dataManager = DataManager.shared
     @Environment(\.dismiss) var dismiss
     @State private var artwork: UIImage? = nil
@@ -15,6 +16,8 @@ struct FullPlayerView: View {
     @State private var showSegmentInspector = false
     @State private var showDebugHUD = false
     private let enableDebugHUDButton = false // Set to true to re-enable the debug HUD toggle button in the player
+
+    private var isRadio: Bool { player.currentEpisode == nil && radio.currentStation != nil }
 
     private var episodeSkips: [UserCustomSkip] {
         if let videoId = player.currentEpisode?.videoId {
@@ -85,10 +88,16 @@ struct FullPlayerView: View {
                             .padding(.top, 24)
                             .padding(.bottom, 28)
 
-                        episodeInfo
-                            .padding(.bottom, (currentSpeakerDiarization?.speakers.isEmpty == false) ? 14 : 24)
+                        Group {
+                            if isRadio {
+                                radioInfo
+                            } else {
+                                episodeInfo
+                            }
+                        }
+                            .padding(.bottom, (!isRadio && currentSpeakerDiarization?.speakers.isEmpty == false) ? 14 : 24)
 
-                        if let diarization = currentSpeakerDiarization, !diarization.speakers.isEmpty {
+                        if !isRadio, let diarization = currentSpeakerDiarization, !diarization.speakers.isEmpty {
                             activeSpeakerBar(diarization: diarization)
                                 .padding(.bottom, showDebugHUD ? 10 : 20)
 
@@ -99,16 +108,26 @@ struct FullPlayerView: View {
                             }
                         }
 
-                        scrubBar
-                            .padding(.bottom, 28)
+                        if !isRadio {
+                            scrubBar
+                                .padding(.bottom, 28)
+                        }
 
-                        mainControls
+                        Group {
+                            if isRadio {
+                                radioControls
+                            } else {
+                                mainControls
+                            }
+                        }
                             .padding(.bottom, 20)
 
-                        secondaryControls
-                            .padding(.bottom, DataManager.shared.settings.enableBalanceSlider ? 24 : 40)
+                        if !isRadio {
+                            secondaryControls
+                                .padding(.bottom, DataManager.shared.settings.enableBalanceSlider ? 24 : 40)
+                        }
 
-                        if DataManager.shared.settings.enableBalanceSlider {
+                        if !isRadio, DataManager.shared.settings.enableBalanceSlider {
                             panBar
                                 .padding(.bottom, 40)
                         }
@@ -210,6 +229,83 @@ struct FullPlayerView: View {
                     .lineLimit(1)
             }
             .frame(minHeight: 74, alignment: .topLeading)
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Radio Info (live radio layout)
+
+    private var radioInfo: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(radio.currentStation?.name ?? "Live Radio")
+                    .font(.title3).fontWeight(.bold)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                HStack(spacing: 6) {
+                    Text(radio.isLoading ? "Live Radio • Loading..." : "Live Radio")
+                        .font(.subheadline)
+                        .foregroundColor(PodcastTheme.accent)
+                        .lineLimit(1)
+                    if radio.isLoading {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    }
+                }
+            }
+            .frame(minHeight: 74, alignment: .topLeading)
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Radio Controls (play/pause + stop only)
+
+    private var radioControls: some View {
+        HStack {
+            Spacer()
+
+            // Stop
+            Button { radio.stop() } label: {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(.primary)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(SpringButtonStyle())
+
+            Spacer()
+
+            // Play/Pause
+            Button {
+                if let station = radio.currentStation {
+                    radio.toggle(station: station)
+                }
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Color.primary)
+                        .frame(width: 72, height: 72)
+                    if radio.isLoading {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: Color(.systemBackground)))
+                    } else {
+                        Image(systemName: radio.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(Color(.systemBackground))
+                            .offset(x: radio.isPlaying ? 0 : 2)
+                    }
+                }
+            }
+            .buttonStyle(SpringButtonStyle())
+
+            Spacer()
+
+            // Balance spacer so play/pause stays centered
+            Color.clear
+                .frame(width: 44, height: 44)
+                .allowsHitTesting(false)
 
             Spacer()
         }
