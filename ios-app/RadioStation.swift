@@ -29,9 +29,11 @@ public class RadioStore: ObservableObject {
         if stations.isEmpty {
             stations = [
                 RadioStation(name: "ABC Jazz", streamURL: "https://abc.streamguys1.com/live/abcjazz/icecast.audio"),
-                RadioStation(name: "Classical NEPM", streamURL: "https://nepr.iad.streamguys1.com/WFCR-HD.mp3")
+                RadioStation(name: "Classical NEPM", streamURL: "https://nepr.streamguys1.com/nopreroll-WFCR-HD.mp3?uuid=ppyh87cvj")
             ]
             saveStations()
+        } else {
+            migrateDefaultURLsIfNeeded()
         }
     }
 
@@ -68,6 +70,22 @@ public class RadioStore: ObservableObject {
         if let uuidString = UserDefaults.standard.string(forKey: lastStationKey) {
             lastPlayedStationID = UUID(uuidString: uuidString)
         }
+    }
+
+    private func migrateDefaultURLsIfNeeded() {
+        let defaults: [(name: String, url: String)] = [
+            ("ABC Jazz", "https://abc.streamguys1.com/live/abcjazz/icecast.audio"),
+            ("Classical NEPM", "https://nepr.streamguys1.com/nopreroll-WFCR-HD.mp3?uuid=ppyh87cvj")
+        ]
+        var changed = false
+        for def in defaults {
+            if let idx = stations.firstIndex(where: { $0.name == def.name }),
+               stations[idx].streamURL != def.url {
+                stations[idx].streamURL = def.url
+                changed = true
+            }
+        }
+        if changed { saveStations() }
     }
 
     private func saveStations() {
