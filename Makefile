@@ -14,6 +14,7 @@ PodcastThis_FILES = ios-app/PodcastThisApp.swift \
                     ios-app/PodcastPlayer.swift \
                     ios-app/RadioStation.swift \
                     ios-app/RadioPlayer.swift \
+                    ios-app/RadioPlayerView.swift \
                     ios-app/RadioView.swift \
                     ios-app/LibraryView.swift \
                     ios-app/SubscriptionsView.swift \

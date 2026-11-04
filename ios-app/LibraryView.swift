@@ -1071,7 +1071,21 @@ struct MiniPlayerBar: View {
     @ObservedObject var player = PodcastPlayer.shared
     @ObservedObject var radio = RadioPlayer.shared
     @Binding var showFullPlayer: Bool
+    @Binding var showRadioPlayer: Bool
     @State private var artwork: UIImage? = nil
+
+    private var radioTrackLine: String {
+        let parts = [radio.liveNowPlayingTitle, radio.liveNowPlayingSubtitle]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !parts.isEmpty { return parts.joined(separator: " - ") }
+        if let urlString = radio.currentStation?.streamURL,
+           let url = URL(string: urlString),
+           let host = url.host, !host.isEmpty {
+            return host
+        }
+        return "Live"
+    }
 
     var body: some View {
         let isRadio = player.currentEpisode == nil && radio.currentStation != nil
@@ -1090,14 +1104,28 @@ struct MiniPlayerBar: View {
             }
 
             HStack(spacing: 12) {
-                ArtworkView(image: isRadio ? nil : artwork, size: 44)
-                    .cornerRadius(8)
+                if isRadio {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(PodcastTheme.accentGradient)
+                            .frame(width: 44, height: 44)
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.system(size: 20))
+                            .foregroundColor(.white)
+                    }
+                } else {
+                    ArtworkView(image: artwork, size: 44)
+                        .cornerRadius(8)
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     if isRadio {
-                        Text(radio.currentStation?.name ?? "Radio")
-                            .font(.subheadline.weight(.semibold)).lineLimit(1)
-                        Text("Live")
+                        HStack(spacing: 6) {
+                            RadioLiveDot(active: radio.liveState == .playingLive)
+                            Text(radio.currentStation?.name ?? "Radio")
+                                .font(.subheadline.weight(.semibold)).lineLimit(1)
+                        }
+                        Text(radioTrackLine)
                             .font(.caption).foregroundColor(.secondary).lineLimit(1)
                     } else {
                         Text(player.currentEpisode?.title ?? "")
@@ -1111,9 +1139,6 @@ struct MiniPlayerBar: View {
 
                 HStack(spacing: 20) {
                     if isRadio {
-                        Button { radio.stop() } label: {
-                            Image(systemName: "square.stop.fill").font(.system(size: 20))
-                        }
                         if radio.isLoading {
                             ProgressView()
                                 .progressViewStyle(CircularProgressViewStyle(tint: PodcastTheme.accent))
@@ -1137,7 +1162,13 @@ struct MiniPlayerBar: View {
             .padding(.vertical, 10)
         }
         .background(.ultraThinMaterial)
-        .onTapGesture { showFullPlayer = true }
+        .onTapGesture {
+            if isRadio {
+                showRadioPlayer = true
+            } else {
+                showFullPlayer = true
+            }
+        }
         .onAppear { loadArt() }
         .onChange(of: player.currentEpisode) { _ in loadArt() }
     }

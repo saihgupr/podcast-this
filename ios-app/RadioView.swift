@@ -4,6 +4,7 @@ struct RadioView: View {
     @ObservedObject var store = RadioStore.shared
     @ObservedObject var radio = RadioPlayer.shared
     @ObservedObject var podcastPlayer = PodcastPlayer.shared
+    @Binding var showRadioPlayer: Bool
 
     @State private var showingAddSheet = false
     @State private var editingStation: RadioStation? = nil
@@ -49,8 +50,12 @@ struct RadioView: View {
                             )
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                radio.toggle(station: station)
+                                if radio.currentStation?.id != station.id {
+                                    radio.play(station: station)
+                                }
+                                showRadioPlayer = true
                             }
+                            .listRowBackground(radio.currentStation?.id == station.id ? PodcastTheme.accent.opacity(0.10) : Color.clear)
                             .contextMenu {
                                 Button {
                                     startEditing(station)
@@ -235,10 +240,14 @@ private struct RadioStationRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            if isCurrent {
+                RadioLiveDot(active: radio.liveState == .playingLive)
+            }
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(station.name)
                     .font(.subheadline).fontWeight(.semibold)
-                    .foregroundColor(.primary)
+                    .foregroundColor(isCurrent ? PodcastTheme.accent : .primary)
                 Text(station.streamURL)
                     .font(.caption)
                     .foregroundColor(.secondary)

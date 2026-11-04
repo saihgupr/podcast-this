@@ -21,6 +21,7 @@ struct MainTabView: View {
     @ObservedObject var player = PodcastPlayer.shared
     @ObservedObject var radio = RadioPlayer.shared
     @State private var showFullPlayer = false
+    @State private var showRadioPlayer = false
     @State private var selectedTab = 0
 
     var body: some View {
@@ -50,7 +51,7 @@ struct MainTabView: View {
                     }
                     .tag(1)
 
-                RadioView()
+                RadioView(showRadioPlayer: $showRadioPlayer)
                     .tabItem {
                         Label("Radio", systemImage: "antenna.radiowaves.left.and.right")
                     }
@@ -73,7 +74,7 @@ struct MainTabView: View {
             // Sticky mini player sits above the tab bar
             if player.currentEpisode != nil || radio.currentStation != nil {
                 VStack(spacing: 0) {
-                    MiniPlayerBar(showFullPlayer: $showFullPlayer)
+                    MiniPlayerBar(showFullPlayer: $showFullPlayer, showRadioPlayer: $showRadioPlayer)
                     // Spacer for the native tab bar height
                     Color.clear.frame(height: 49)
                 }
@@ -90,6 +91,15 @@ struct MainTabView: View {
                     .presentationDragIndicator(.visible)
             } else {
                 FullPlayerView()
+            }
+        }
+        .sheet(isPresented: $showRadioPlayer) {
+            if #available(iOS 16.0, *) {
+                RadioPlayerView()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            } else {
+                RadioPlayerView()
             }
         }
         .onOpenURL { incomingUrl in
