@@ -169,8 +169,12 @@ class RadioPlayer: NSObject, ObservableObject {
     }
 
     func toggle(station: RadioStation) {
-        if currentStation?.id == station.id, isPlaying || isLoading {
-            stop()
+        if currentStation?.id == station.id, avPlayer != nil {
+            if isPlaying || isLoading {
+                pause()
+            } else {
+                resume()
+            }
         } else {
             play(station: station)
         }

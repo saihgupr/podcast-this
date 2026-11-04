@@ -57,6 +57,7 @@ struct RadioPlayerView: View {
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 0) {
                             Spacer(minLength: 0)
+                            Spacer(minLength: 0)
 
                             centerpiece
                                 .padding(.bottom, 22)

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Radio full-player polish to match podcast player: breathing artwork with LIVE badge, blurred gradient background, LIVE/Buffering pill, centered play with balanced stop button.
+- Radio pause now holds the stream in place instead of quitting it, so play resumes where it left off.
 
 ## [1.0.1] - 2026-10-29
 
