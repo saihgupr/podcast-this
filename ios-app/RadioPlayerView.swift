@@ -65,13 +65,16 @@ struct RadioPlayerView: View {
                             .padding(.bottom, 26)
 
                         transport
-                            .padding(.bottom, 22)
-
-                        utilityRow
-                            .padding(.bottom, 36)
+                            .padding(.bottom, 8)
                     }
                     .padding(.horizontal, 24)
                 }
+
+                Spacer(minLength: 12)
+
+                utilityRow
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 28)
             }
         }
         .preferredColorScheme(.dark)
