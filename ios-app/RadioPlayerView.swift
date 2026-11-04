@@ -423,6 +423,10 @@ struct RadioPlayerView: View {
 
 // MARK: - AirPlay
 
+// NOTE: Plain delegate-free AVRoutePickerView. The system route list is
+// presented out-of-process by iOS with no public dismiss API, so in-app
+// dismissal is a no-op — the card closes via tap-outside/Done like every
+// other app. Do not re-add an auto-dismiss Coordinator here.
 private struct AirPlayButton: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let picker = AVRoutePickerView()
