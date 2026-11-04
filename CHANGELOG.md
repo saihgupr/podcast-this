@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Radio tab with live streaming (ABC Jazz + Classical NEPM presets, custom station add/edit/delete, background + lock screen playback).
 
+### Fixed
+- Radio full-player polish to match podcast player: breathing artwork with LIVE badge, blurred gradient background, LIVE/Buffering pill, centered play with balanced stop button.
+
 ## [1.0.1] - 2026-10-29
 
 ### Fixed

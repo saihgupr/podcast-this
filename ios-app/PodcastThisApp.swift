@@ -52,7 +52,7 @@ struct MainTabView: View {
 
                 RadioView()
                     .tabItem {
-                        Label("Radio", systemImage: "radio.fill")
+                        Label("Radio", systemImage: "antenna.radiowaves.left.and.right")
                     }
                     .tag(4)
 

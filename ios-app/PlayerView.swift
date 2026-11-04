@@ -8,6 +8,7 @@ struct FullPlayerView: View {
     @ObservedObject var radio = RadioPlayer.shared
     @ObservedObject var dataManager = DataManager.shared
     @Environment(\.dismiss) var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var artwork: UIImage? = nil
     @State private var isScrubbing = false
     @State private var scrubTime: Double = 0
@@ -18,6 +19,9 @@ struct FullPlayerView: View {
     private let enableDebugHUDButton = false // Set to true to re-enable the debug HUD toggle button in the player
 
     private var isRadio: Bool { player.currentEpisode == nil && radio.currentStation != nil }
+
+    /// Unified playing state so radio artwork breathes like podcast art.
+    private var effectivePlaying: Bool { player.isPlaying || radio.isPlaying }
 
     private var episodeSkips: [UserCustomSkip] {
         if let videoId = player.currentEpisode?.videoId {
@@ -171,9 +175,17 @@ struct FullPlayerView: View {
                     .blur(radius: 55)
                     .opacity(0.45)
                     .clipped()
+            } else if isRadio {
+                // Live radio has no episode art — blur the accent gradient
+                // to match the podcast blurred-art background.
+                PodcastTheme.accentGradient
+                    .frame(width: screenWidth, height: UIScreen.main.bounds.height)
+                    .blur(radius: 55)
+                    .opacity(0.45)
+                    .clipped()
             }
             Color(.systemBackground)
-                .opacity(artwork == nil ? 1.0 : 0.58)
+                .opacity(artwork == nil && !isRadio ? 1.0 : 0.58)
         }
         .frame(width: screenWidth, height: UIScreen.main.bounds.height)
         .ignoresSafeArea()
@@ -198,6 +210,32 @@ struct FullPlayerView: View {
                     .frame(width: artSize, height: artSize)
                     .cornerRadius(artSize * 0.08)
                     .shadow(color: .black.opacity(0.35), radius: 22, x: 0, y: 10)
+            } else if isRadio {
+                // Live-radio treatment: accent gradient base with top sheen,
+                // subtle inner edge, and a large soft waveform glyph.
+                ZStack {
+                    RoundedRectangle(cornerRadius: artSize * 0.08)
+                        .fill(PodcastTheme.accentGradient)
+                    RoundedRectangle(cornerRadius: artSize * 0.08)
+                        .fill(
+                            LinearGradient(
+                                colors: [.white.opacity(0.28), .white.opacity(0.0)],
+                                startPoint: .top, endPoint: .center
+                            )
+                        )
+                    RoundedRectangle(cornerRadius: artSize * 0.08)
+                        .stroke(.white.opacity(0.18), lineWidth: 1)
+                    Image(systemName: "waveform")
+                        .font(.system(size: artSize * 0.30, weight: .light))
+                        .foregroundColor(.white.opacity(0.9))
+                        .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
+                        .accessibilityHidden(true)
+                }
+                .frame(width: artSize, height: artSize)
+                .shadow(color: .black.opacity(0.3), radius: 22, x: 0, y: 10)
+                .overlay(alignment: .topTrailing) {
+                    liveArtworkBadge
+                }
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: artSize * 0.08)
@@ -210,8 +248,25 @@ struct FullPlayerView: View {
                 .shadow(color: .black.opacity(0.3), radius: 22, x: 0, y: 10)
             }
         }
-        .scaleEffect(player.isPlaying ? 1.0 : 0.88)
-        .animation(.spring(response: 0.45, dampingFraction: 0.65), value: player.isPlaying)
+        .scaleEffect(effectivePlaying ? 1.0 : 0.88)
+        .animation(reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.65), value: effectivePlaying)
+    }
+
+    // MARK: - Live Artwork Badge
+
+    private var liveArtworkBadge: some View {
+        HStack(spacing: 6) {
+            LivePulseDot(active: radio.isPlaying)
+            Text("LIVE")
+                .font(.caption2).fontWeight(.black)
+                .foregroundColor(.white)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Color.black.opacity(0.55)))
+        .padding(14)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(radio.isLoading ? "Live radio, buffering" : (radio.isPlaying ? "Live radio, playing" : "Live radio, paused"))
     }
 
     // MARK: - Episode Info
@@ -238,20 +293,40 @@ struct FullPlayerView: View {
 
     private var radioInfo: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(radio.currentStation?.name ?? "Live Radio")
                     .font(.title3).fontWeight(.bold)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                HStack(spacing: 6) {
-                    Text(radio.isLoading ? "Live Radio • Loading..." : "Live Radio")
+                HStack(spacing: 8) {
+                    if radio.isLoading {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("Buffering…")
+                                .font(.caption2).fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.primary.opacity(0.10)))
+                    } else {
+                        HStack(spacing: 6) {
+                            LivePulseDot(active: radio.isPlaying)
+                            Text("LIVE")
+                                .font(.caption2).fontWeight(.black)
+                                .foregroundColor(.primary)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.primary.opacity(0.10)))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(radio.isPlaying ? "Live, playing" : "Live, paused")
+                    }
+                    Text("Live Radio")
                         .font(.subheadline)
                         .foregroundColor(PodcastTheme.accent)
                         .lineLimit(1)
-                    if radio.isLoading {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    }
                 }
             }
             .frame(minHeight: 74, alignment: .topLeading)
@@ -264,20 +339,29 @@ struct FullPlayerView: View {
 
     private var radioControls: some View {
         HStack {
-            Spacer()
+            Group {
+                Spacer()
 
-            // Stop
-            Button { radio.stop() } label: {
-                Image(systemName: "stop.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(.primary)
-                    .frame(width: 44, height: 44)
+                // Stop — deliberate secondary button in a 44pt circle.
+                Button {
+                    radio.stop()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.primary.opacity(0.12))
+                            .frame(width: 44, height: 44)
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.primary.opacity(0.85))
+                    }
+                }
+                .buttonStyle(SpringButtonStyle())
+                .accessibilityLabel("Stop")
+
+                Spacer()
             }
-            .buttonStyle(SpringButtonStyle())
 
-            Spacer()
-
-            // Play/Pause
+            // Play/Pause — centered primary circle, mirrors mainControls.
             Button {
                 if let station = radio.currentStation {
                     radio.toggle(station: station)
@@ -299,15 +383,19 @@ struct FullPlayerView: View {
                 }
             }
             .buttonStyle(SpringButtonStyle())
+            .accessibilityLabel(radio.isPlaying ? "Pause" : "Play")
 
-            Spacer()
+            Group {
+                Spacer()
 
-            // Balance spacer so play/pause stays centered
-            Color.clear
-                .frame(width: 44, height: 44)
-                .allowsHitTesting(false)
+                // Inert balancer — keeps play perfectly centered on all widths.
+                Color.clear
+                    .frame(width: 44, height: 44)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
 
-            Spacer()
+                Spacer()
+            }
         }
     }
 
@@ -1206,5 +1294,36 @@ struct SpringButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Live Pulse Dot
+
+/// Pulsing red dot used by the radio LIVE badges. The expanding ring
+/// animates only while `active` and stays static under Reduce Motion.
+private struct LivePulseDot: View {
+    var active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color(red: 1.0, green: 0.23, blue: 0.23))
+                .frame(width: 7, height: 7)
+                .opacity(active ? 1.0 : 0.35)
+            Circle()
+                .fill(Color(red: 1.0, green: 0.23, blue: 0.23))
+                .frame(width: 7, height: 7)
+                .scaleEffect(pulse ? 2.2 : 1.0)
+                .opacity(pulse ? 0.0 : (active ? 0.6 : 0.0))
+        }
+        .accessibilityHidden(true)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 1.2).repeatForever(autoreverses: false)) {
+                pulse = true
+            }
+        }
     }
 }
