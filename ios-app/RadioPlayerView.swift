@@ -53,24 +53,28 @@ struct RadioPlayerView: View {
                     .padding(.top, 14)
                     .padding(.bottom, 18)
 
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        centerpiece
-                            .padding(.bottom, 22)
+                GeometryReader { geo in
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            Spacer(minLength: 0)
 
-                        stationBlock
-                            .padding(.bottom, 20)
+                            centerpiece
+                                .padding(.bottom, 22)
 
-                        statusBar
-                            .padding(.bottom, 26)
+                            stationBlock
+                                .padding(.bottom, 20)
 
-                        transport
-                            .padding(.bottom, 8)
+                            statusBar
+                                .padding(.bottom, 26)
+
+                            transport
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 24)
+                        .frame(minHeight: geo.size.height)
                     }
-                    .padding(.horizontal, 24)
                 }
-
-                Spacer(minLength: 12)
 
                 utilityRow
                     .padding(.horizontal, 24)
@@ -100,46 +104,16 @@ struct RadioPlayerView: View {
 
                 Spacer()
 
-                connectionBadge
+                Color.clear
+                    .frame(width: 44, height: 44)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
 
             Text("LIVE RADIO")
                 .font(.caption).fontWeight(.bold)
                 .kerning(2)
                 .foregroundColor(.white.opacity(0.6))
-        }
-    }
-
-    private var connectionBadge: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(badgeColor)
-                .frame(width: 7, height: 7)
-            Text(badgeText)
-                .font(.caption2).fontWeight(.bold)
-        }
-        .foregroundColor(badgeColor)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Capsule().fill(Color.white.opacity(0.08)))
-    }
-
-    private var badgeText: String {
-        switch radio.liveState {
-        case .idle: return "IDLE"
-        case .buffering: return "BUFFERING"
-        case .playingLive: return "CONNECTED"
-        case .pausedBehindLive: return "PAUSED"
-        case .error: return "ERROR"
-        }
-    }
-
-    private var badgeColor: Color {
-        switch radio.liveState {
-        case .playingLive: return Color(red: 0.35, green: 0.85, blue: 0.45)
-        case .buffering: return Color.orange
-        case .error: return Color(red: 1.0, green: 0.35, blue: 0.35)
-        case .pausedBehindLive, .idle: return Color.white.opacity(0.5)
         }
     }
 
