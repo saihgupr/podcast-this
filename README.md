@@ -83,7 +83,7 @@ To enable AI speaker diarization and per-speaker skipping, run the companion Fas
 ## Installation
 
 ### Requirements
-* Jailbroken device running iOS 14.0 or newer (tested on iOS 15 and 16, rootless jailbreaks supported)
+* Jailbroken device running iOS 15.0 or newer (tested on iOS 15 and 16, rootless jailbreaks supported)
 * Dependencies: `python3` and `ffmpeg` (installed automatically by your package manager)
 
 ### Install via Sileo / Zebra (recommended)
