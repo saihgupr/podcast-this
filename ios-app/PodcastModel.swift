@@ -720,6 +720,8 @@ public struct ActiveDownload: Identifiable, Codable {
     public let progress: Double
     public let speed: String
     public let eta: String
+    public var pid: Int? = nil
+    public var updatedAt: Double? = nil
     
     enum CodingKeys: String, CodingKey {
         case videoId = "video_id"
@@ -729,6 +731,8 @@ public struct ActiveDownload: Identifiable, Codable {
         case progress
         case speed
         case eta
+        case pid
+        case updatedAt = "updated_at"
     }
 }
 

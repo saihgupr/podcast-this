@@ -149,6 +149,10 @@ def notify_app_reload():
 def update_active_download(video_id, data):
     try:
         setup_directories()
+        # Stamp the owning process so the app can drop entries left behind by a
+        # download that iOS killed (jetsam, app termination, reboot).
+        data["pid"] = os.getpid()
+        data["updated_at"] = time.time()
         state = {}
         if os.path.exists(ACTIVE_DOWNLOADS_FILE):
             try:

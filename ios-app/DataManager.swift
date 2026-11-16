@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import UIKit
 import AVFoundation
+import Darwin
 
 
 
@@ -394,9 +395,22 @@ public class DataManager: ObservableObject {
         }
         
         let list = Array(container.activeDownloads.values).sorted(by: { $0.title < $1.title })
+        // Drop entries whose downloader process is gone. iOS can kill the app (and its
+        // child script) mid-download, which otherwise leaves a permanent 100% row.
+        let now = Date().timeIntervalSince1970
+        let liveDownloads = list.filter { self.isActiveDownloadAlive($0, now: now) }
+        if liveDownloads.count != list.count {
+            let pruned: [String: [String: ActiveDownload]] = [
+                "active_downloads": Dictionary(uniqueKeysWithValues: liveDownloads.map { ($0.videoId, $0) })
+            ]
+            if let prunedData = try? JSONEncoder().encode(pruned) {
+                try? prunedData.write(to: fileURL, options: .atomic)
+            }
+        }
+        
         DispatchQueue.main.async {
-            if !list.isEmpty {
-                self.activeDownloadsList = list
+            if !liveDownloads.isEmpty {
+                self.activeDownloadsList = liveDownloads
             } else if self.activeDownloads.isEmpty {
                 self.activeDownloadsList = []
             }
@@ -405,6 +419,19 @@ public class DataManager: ObservableObject {
             self.isDownloading = anyActive
             self.evaluateProgressTimer()
         }
+    }
+    
+    private func isActiveDownloadAlive(_ download: ActiveDownload, now: TimeInterval) -> Bool {
+        if let pid = download.pid, pid > 0 {
+            if kill(pid_t(pid), 0) == 0 { return true }
+            // EPERM means the process exists but belongs to another user.
+            return errno == EPERM
+        }
+        // Older entries have no pid: expire them instead of trusting them forever.
+        if let updatedAt = download.updatedAt {
+            return now - updatedAt < 600
+        }
+        return false
     }
 
     public func isDaemonRunning() -> Bool {
