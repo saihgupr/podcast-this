@@ -41,6 +41,16 @@ PodcastThis is a free, open-source iOS app that turns YouTube channels and singl
 * **Playback Controls**: Variable speed from 0.75x to 2.0x, customizable skip intervals, and progress memory per episode.
 * **Stereo Balance Slider**: Optional real-time left/right balance slider in Settings using `MTAudioProcessingTap`.
 
+### Apple Watch and Lock Screen Actions
+The Now Playing session carries two extra actions, reachable from the Apple Watch "..." (More) menu and the Lock Screen remote menu:
+
+| Watch Menu Label | Action |
+|:---|:---|
+| Play More Like This | Skip Speaker — marks the speaker talking right now as skipped and jumps past their turn, same as the purple Skip button in the player. |
+| Bookmark | Analyze Speakers — starts WhisperX speaker analysis for the playing episode, same as Analyze Speakers in the episode long-press menu. |
+
+Apple decides the labels for these slots, so custom names cannot be guaranteed on watchOS.
+
 ---
 
 ## Optional: WhisperX Speaker Diarization
@@ -124,6 +134,13 @@ podcastthis-add "https://www.youtube.com/@SomeChannel" --subscribe
 | `--channel-url <url>` | Attribute the video to a specific channel URL. |
 
 A channel URL passed without `--subscribe` is treated as a subscription, since a bare channel link has no single video to download.
+
+On rootless jailbreaks a plain SSH login does not include `/var/jb/usr/local/bin` in `PATH`, so call the full path or add it first:
+
+```bash
+/var/jb/usr/local/bin/podcastthis-add "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+export PATH="/var/jb/usr/local/bin:$PATH"
+```
 
 ### `podcastthis-daemon`
 

@@ -746,6 +746,27 @@ public class PodcastPlayer: NSObject, ObservableObject {
             self.seek(to: positionEvent.positionTime)
             return .success
         }
+
+        // Feedback commands — surfaced in the Apple Watch "..." (More) menu and the
+        // Lock Screen remote menu. watchOS/iOS keep their own labels for these slots,
+        // so the localized titles below are best-effort only.
+        commandCenter.likeCommand.isEnabled = true
+        commandCenter.likeCommand.localizedTitle = "Skip Speaker"
+        commandCenter.likeCommand.localizedShortTitle = "Skip Speaker"
+        commandCenter.likeCommand.addTarget { [weak self] _ in
+            guard let self = self else { return .commandFailed }
+            return self.skipCurrentSpeakerFromRemote() ? .success : .commandFailed
+        }
+
+        commandCenter.bookmarkCommand.isEnabled = true
+        commandCenter.bookmarkCommand.localizedTitle = "Analyze Speakers"
+        commandCenter.bookmarkCommand.localizedShortTitle = "Analyze Speakers"
+        commandCenter.bookmarkCommand.addTarget { [weak self] _ in
+            guard let self = self else { return .commandFailed }
+            return self.analyzeCurrentEpisodeSpeakersFromRemote() ? .success : .commandFailed
+        }
+
+        commandCenter.dislikeCommand.isEnabled = false
     }
     
     private func setupNowPlayingInfo(for episode: PodcastEpisode, fileURL: URL) {
@@ -784,6 +805,12 @@ public class PodcastPlayer: NSObject, ObservableObject {
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? playbackRate : 0.0
         
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+
+        // Feedback commands act as one-shot triggers, not toggles.
+        let commandCenter = MPRemoteCommandCenter.shared()
+        commandCenter.likeCommand.isActive = false
+        commandCenter.bookmarkCommand.isActive = false
+        commandCenter.dislikeCommand.isActive = false
     }
     
     // MARK: - Unified Auto-Skipping Engine
@@ -1205,6 +1232,89 @@ public class PodcastPlayer: NSObject, ObservableObject {
         }
 
         return min(resolvedTime, duration > 0 ? duration : resolvedTime)
+    }
+
+    // MARK: - Remote-Triggered Speaker Actions (Watch / Lock Screen)
+
+    /// Mirrors the player's purple Skip button: marks the speaker who is talking
+    /// right now as skipped and jumps past their current turn.
+    @discardableResult
+    public func skipCurrentSpeakerFromRemote() -> Bool {
+        guard !RadioPlayer.shared.isPlaying else { return false }
+        guard let episode = currentEpisode, let diarization = activeDiarization else { return false }
+        let rawTime = avPlayer?.currentTime().seconds ?? currentTime
+        let time = rawTime.isFinite ? rawTime : currentTime
+        guard let segment = speakerSegment(in: diarization, at: time),
+              let profile = diarization.speakers.first(where: { $0.id == segment.speakerId }) else {
+            return false
+        }
+
+        if !profile.isSkipped {
+            dataManager.toggleSpeakerSkip(videoId: episode.videoId, speakerId: profile.id, explicitState: true)
+            invalidateSpeakerSkipCache()
+        }
+
+        let trail = max(0, dataManager.settings.speakerSkipTrail)
+        var target = resolveSkipDestination(time: time)
+        if target <= time + 0.05, segment.end > time {
+            target = resolveSkipDestination(time: segment.end + trail + 0.05)
+        }
+        if target <= time + 0.05 {
+            let refreshed = currentEpisode?.speakerDiarization ?? diarization
+            let skippedIds = Set(refreshed.speakers.filter { $0.isSkipped }.map { $0.id })
+                .union([profile.id])
+            if let nextTurn = diarization.segments.first(where: { $0.start > time && !skippedIds.contains($0.speakerId) }) {
+                target = max(time + 0.05, nextTurn.start)
+            } else if let nextSegment = diarization.segments.first(where: { $0.start > time }) {
+                target = nextSegment.start
+            } else {
+                target = min(time + dataManager.settings.skipDuration, duration)
+            }
+        }
+
+        seek(to: target)
+        return true
+    }
+
+    /// Starts the same WhisperX analysis as "Analyze Speakers" in an episode's
+    /// long-press menu, for whatever is playing now.
+    @discardableResult
+    public func analyzeCurrentEpisodeSpeakersFromRemote() -> Bool {
+        guard !RadioPlayer.shared.isPlaying else { return false }
+        guard let episode = currentEpisode else { return false }
+        let hasDiarization = !(episode.speakerDiarization?.speakers.isEmpty ?? true)
+        dataManager.quickAnalyzeSpeakers(episode: episode, force: hasDiarization) { _ in
+        } completion: { result in
+            switch result {
+            case .success(let diarization):
+                print("[RemoteCommand] Analyze Speakers finished: \(diarization.speakers.count) speaker(s)")
+            case .failure(let error):
+                print("[RemoteCommand] Analyze Speakers failed: \(error.localizedDescription)")
+            }
+        }
+        return true
+    }
+
+    /// Speech turn covering `time`, with the same short-pause tolerance the player UI uses.
+    private func speakerSegment(in diarization: SpeakerDiarizationData, at time: Double) -> SpeakerSegment? {
+        if let direct = diarization.segments.first(where: { time >= $0.start && time <= $0.end }) {
+            return direct
+        }
+        var preceding: SpeakerSegment?
+        for seg in diarization.segments {
+            if seg.end <= time {
+                preceding = seg
+            } else {
+                break
+            }
+        }
+        if let prev = preceding, time - prev.end < 0.8 {
+            return prev
+        }
+        if let next = diarization.segments.first(where: { $0.start > time && $0.start - time < 0.3 }) {
+            return next
+        }
+        return nil
     }
 
     // MARK: - Skip State Machine

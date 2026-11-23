@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Radio tab with live streaming (ABC Jazz + Classical NEPM presets, custom station add/edit/delete, background + lock screen playback).
 - Dedicated live-radio player (live ICY track titles, visualizer, Jump to Live, station cycling, sleep timer, AirPlay) with live mini-player and active row indicators.
+- Apple Watch and Lock Screen remote actions: Skip Speaker (same as the player's purple Skip button) and Analyze Speakers (same as the episode long-press action).
 
 ### Fixed
 - Radio full-player polish to match podcast player: breathing artwork with LIVE badge, blurred gradient background, LIVE/Buffering pill, centered play with balanced stop button.
