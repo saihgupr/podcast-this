@@ -128,6 +128,7 @@ struct RadioView: View {
                 Text("This removes the station from your Radio list. It does not affect downloads.")
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 
     // MARK: - Helpers
@@ -219,6 +220,7 @@ struct RadioView: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 }
 

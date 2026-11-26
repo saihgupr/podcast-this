@@ -20,6 +20,7 @@ struct PodcastThisApp: App {
 struct MainTabView: View {
     @ObservedObject var player = PodcastPlayer.shared
     @ObservedObject var radio = RadioPlayer.shared
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showFullPlayer = false
     @State private var showRadioPlayer = false
     @State private var selectedTab = 0
@@ -75,8 +76,8 @@ struct MainTabView: View {
             if player.currentEpisode != nil || radio.currentStation != nil {
                 VStack(spacing: 0) {
                     MiniPlayerBar(showFullPlayer: $showFullPlayer, showRadioPlayer: $showRadioPlayer)
-                    // Spacer for the native tab bar height
-                    Color.clear.frame(height: 49)
+                    // Spacer for the native tab bar height (50pt on regular iPad, 49pt on compact)
+                    Color.clear.frame(height: horizontalSizeClass == .regular ? 50 : 49)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: player.currentEpisode != nil || radio.currentStation != nil)

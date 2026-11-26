@@ -91,6 +91,7 @@ struct AddView: View {
                     .padding(16)
                     .background(Color(.secondarySystemGroupedBackground))
                     .cornerRadius(16)
+                    .frame(maxWidth: 700)
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
                     .padding(.bottom, 12)
@@ -326,9 +327,10 @@ struct AddView: View {
                             .cornerRadius(16)
 
                         }
+                        .frame(maxWidth: 700)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 80)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
                         .onTapGesture { fieldFocused = false }
                     }
@@ -346,6 +348,7 @@ struct AddView: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 
     // MARK: - Status Card Computed Properties

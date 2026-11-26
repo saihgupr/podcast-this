@@ -67,82 +67,88 @@ struct FullPlayerView: View {
         return player.getSilenceSkipIntervals()
     }
 
-    // Compute sizes from actual screen width — no GeometryReader needed
-    private let screenWidth = UIScreen.main.bounds.width
-    private var artSize: CGFloat { screenWidth - 88 }
-    private var scrubWidth: CGFloat { screenWidth - 56 }
-
     var displayTime: Double { isScrubbing ? scrubTime : player.currentTime }
     var remaining: Double { max(player.duration - displayTime, 0) }
 
     var body: some View {
-        ZStack {
-            // === Blurred Background — full screen ===
-            artworkBackground
+        GeometryReader { geo in
+            let isCompactPortrait = geo.size.height > geo.size.width && geo.size.width < 500
+            let contentWidth = min(geo.size.width, 500)
+            let scrubWidth = max(200, contentWidth - 56)
+            let maxArtWidth = max(140, contentWidth - 88)
+            let artSize = isCompactPortrait
+                ? min(maxArtWidth, geo.size.height * 0.42)
+                : min(maxArtWidth, max(150, geo.size.height * 0.35))
 
-            // === Scrollable content column, pinned center ===
-            VStack(spacing: 0) {
-                handleBar
-                    .padding(.top, 10)
-                    .padding(.bottom, 8)
+            ZStack {
+                // === Blurred Background — fills current sheet or screen ===
+                artworkBackground
 
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        artworkCard
-                            .padding(.top, 24)
-                            .padding(.bottom, 28)
+                // === Scrollable content column, pinned center ===
+                VStack(spacing: 0) {
+                    handleBar
+                        .padding(.top, 10)
+                        .padding(.bottom, 8)
+                        .onTapGesture { dismiss() }
 
-                        Group {
-                            if isRadio {
-                                radioInfo
-                            } else {
-                                episodeInfo
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            artworkCard(artSize: artSize)
+                                .padding(.top, isCompactPortrait ? 24 : 14)
+                                .padding(.bottom, isCompactPortrait ? 28 : 20)
+
+                            Group {
+                                if isRadio {
+                                    radioInfo
+                                } else {
+                                    episodeInfo
+                                }
+                            }
+                            .padding(.bottom, (!isRadio && currentSpeakerDiarization?.speakers.isEmpty == false) ? 14 : (isCompactPortrait ? 24 : 18))
+
+                            if !isRadio, let diarization = currentSpeakerDiarization, !diarization.speakers.isEmpty {
+                                activeSpeakerBar(diarization: diarization, scrubWidth: scrubWidth)
+                                    .padding(.bottom, showDebugHUD ? 10 : (isCompactPortrait ? 20 : 16))
+
+                                if showDebugHUD {
+                                    playbackDebugHUD(diarization: diarization, scrubWidth: scrubWidth)
+                                        .padding(.bottom, 20)
+                                        .transition(.opacity.combined(with: .move(edge: .top)))
+                                }
+                            }
+
+                            if !isRadio {
+                                scrubBar(scrubWidth: scrubWidth)
+                                    .padding(.bottom, isCompactPortrait ? 28 : 20)
+                            }
+
+                            Group {
+                                if isRadio {
+                                    radioControls
+                                } else {
+                                    mainControls
+                                }
+                            }
+                            .padding(.bottom, isCompactPortrait ? 20 : 16)
+
+                            if !isRadio {
+                                secondaryControls
+                                    .padding(.bottom, DataManager.shared.settings.enableBalanceSlider ? 24 : 36)
+                            }
+
+                            if !isRadio, DataManager.shared.settings.enableBalanceSlider {
+                                panBar(scrubWidth: scrubWidth)
+                                    .padding(.bottom, 36)
                             }
                         }
-                            .padding(.bottom, (!isRadio && currentSpeakerDiarization?.speakers.isEmpty == false) ? 14 : 24)
-
-                        if !isRadio, let diarization = currentSpeakerDiarization, !diarization.speakers.isEmpty {
-                            activeSpeakerBar(diarization: diarization)
-                                .padding(.bottom, showDebugHUD ? 10 : 20)
-
-                            if showDebugHUD {
-                                playbackDebugHUD(diarization: diarization)
-                                    .padding(.bottom, 20)
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
-                            }
-                        }
-
-                        if !isRadio {
-                            scrubBar
-                                .padding(.bottom, 28)
-                        }
-
-                        Group {
-                            if isRadio {
-                                radioControls
-                            } else {
-                                mainControls
-                            }
-                        }
-                            .padding(.bottom, 20)
-
-                        if !isRadio {
-                            secondaryControls
-                                .padding(.bottom, DataManager.shared.settings.enableBalanceSlider ? 24 : 40)
-                        }
-
-                        if !isRadio, DataManager.shared.settings.enableBalanceSlider {
-                            panBar
-                                .padding(.bottom, 40)
-                        }
+                        .padding(.horizontal, 28)
+                        .frame(width: contentWidth)
+                        .frame(maxWidth: .infinity)
                     }
-                    .padding(.horizontal, 32)
-                    .frame(width: screenWidth) // anchor everything to screen width
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(width: screenWidth) // ensure VStack never exceeds screen width
         }
-        .frame(width: screenWidth, alignment: .center)
         .interactiveDismissDisabled(false)
         .onAppear { loadArt() }
         .onChange(of: player.currentEpisode) { _ in loadArt() }
@@ -166,29 +172,30 @@ struct FullPlayerView: View {
     // MARK: - Background
 
     private var artworkBackground: some View {
-        ZStack {
-            if let img = artwork {
-                Image(uiImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: screenWidth, height: UIScreen.main.bounds.height)
-                    .blur(radius: 55)
-                    .opacity(0.45)
-                    .clipped()
-            } else if isRadio {
-                // Live radio has no episode art — blur the accent gradient
-                // to match the podcast blurred-art background.
-                PodcastTheme.accentGradient
-                    .frame(width: screenWidth, height: UIScreen.main.bounds.height)
-                    .blur(radius: 55)
-                    .opacity(0.45)
-                    .clipped()
-            }
-            Color(.systemBackground)
-                .opacity(artwork == nil && !isRadio ? 1.0 : 0.58)
-        }
-        .frame(width: screenWidth, height: UIScreen.main.bounds.height)
-        .ignoresSafeArea()
+        Color.clear
+            .background(
+                Group {
+                    if let img = artwork {
+                        Image(uiImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .blur(radius: 55)
+                            .opacity(0.45)
+                    } else if isRadio {
+                        // Live radio has no episode art — blur the accent gradient
+                        // to match the podcast blurred-art background.
+                        PodcastTheme.accentGradient
+                            .blur(radius: 55)
+                            .opacity(0.45)
+                    }
+                }
+            )
+            .clipped()
+            .overlay(
+                Color(.systemBackground)
+                    .opacity(artwork == nil && !isRadio ? 1.0 : 0.58)
+            )
+            .ignoresSafeArea()
     }
 
     // MARK: - Handle bar
@@ -201,7 +208,7 @@ struct FullPlayerView: View {
 
     // MARK: - Artwork Card
 
-    private var artworkCard: some View {
+    private func artworkCard(artSize: CGFloat) -> some View {
         Group {
             if let img = artwork {
                 Image(uiImage: img)
@@ -399,9 +406,9 @@ struct FullPlayerView: View {
         }
     }
 
-    // MARK: - Scrub Bar (fixed width, no nested GeometryReader)
+    // MARK: - Scrub Bar (dynamic width from parent geometry)
 
-    private var scrubBar: some View {
+    private func scrubBar(scrubWidth: CGFloat) -> some View {
         let progress = player.duration > 0 ? CGFloat(displayTime / player.duration) : 0
         return VStack(spacing: 8) {
             ZStack(alignment: .leading) {
@@ -669,7 +676,7 @@ struct FullPlayerView: View {
 
     // MARK: - L/R Audio Balance (Pan) Slider
 
-    private var panBar: some View {
+    private func panBar(scrubWidth: CGFloat) -> some View {
         // pan is -1.0 (Left) to 1.0 (Right)
         let panFraction = CGFloat((player.pan + 1.0) / 2.0)
         let centerOffset = scrubWidth / 2.0
@@ -753,7 +760,7 @@ struct FullPlayerView: View {
 
     // MARK: - Active Speaker Pill / Skip Control
 
-    private func activeSpeakerBar(diarization: SpeakerDiarizationData) -> some View {
+    private func activeSpeakerBar(diarization: SpeakerDiarizationData, scrubWidth: CGFloat) -> some View {
         let skippedSpeakerSegments = player.getMergedSpeakerSkipRegions()
         let activeSpeakerSkipRegion = skippedSpeakerSegments.first { displayTime >= $0.start && displayTime < $0.end }
         let isInsideSpeakerSkip = activeSpeakerSkipRegion != nil
@@ -891,7 +898,7 @@ struct FullPlayerView: View {
 
     // MARK: - Playback Debug HUD
 
-    private func playbackDebugHUD(diarization: SpeakerDiarizationData) -> some View {
+    private func playbackDebugHUD(diarization: SpeakerDiarizationData, scrubWidth: CGFloat) -> some View {
         let skippedSpeakerSegments = player.getMergedSpeakerSkipRegions()
         let activeSpeakerSkipRegion = skippedSpeakerSegments.first { displayTime >= $0.start && displayTime < $0.end }
         let isInsideSpeakerSkip = activeSpeakerSkipRegion != nil

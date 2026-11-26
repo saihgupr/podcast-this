@@ -42,8 +42,20 @@ struct LibraryView: View {
 
     private var layoutMode: LibraryLayoutMode { LibraryLayoutMode(rawValue: layoutModeRaw) ?? .grid2 }
 
-    private func gridColumns(_ count: Int) -> [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: 12), count: count)
+    private func gridMetrics(for width: CGFloat, compact: Bool) -> (columns: [GridItem], spacing: CGFloat, hPadding: CGFloat, artSize: CGFloat) {
+        let hPadding: CGFloat = compact ? 12 : 16
+        let spacing: CGFloat = compact ? 12 : 20
+        let count: Int
+        if width < 500 {
+            count = compact ? 3 : 2
+        } else {
+            let idealCellWidth: CGFloat = compact ? 112 : 165
+            count = max(compact ? 3 : 2, Int(floor((width - hPadding * 2 + spacing) / (idealCellWidth + spacing))))
+        }
+        let usableWidth = max(100, width - (hPadding * 2) - (spacing * CGFloat(count - 1)))
+        let artSize = floor(usableWidth / CGFloat(count))
+        let columns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: count)
+        return (columns, spacing, hPadding, artSize)
     }
 
     private func showContextMenu(for show: PodcastShow) -> some View {
@@ -112,92 +124,98 @@ struct LibraryView: View {
             ZStack {
                 Color(.systemGroupedBackground).ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    ActiveDownloadsBanner()
+                GeometryReader { geo in
+                    VStack(spacing: 0) {
+                        ActiveDownloadsBanner()
 
-                    if dataManager.shows.isEmpty {
-                        ScrollView {
-                            RefreshControlInstaller(onRefresh: {
-                                await dataManager.loadDataAsync()
-                            })
-                            .frame(height: 1)
+                        if dataManager.shows.isEmpty {
+                            ScrollView {
+                                RefreshControlInstaller(onRefresh: {
+                                    await dataManager.loadDataAsync()
+                                })
+                                .frame(height: 1)
 
-                            EmptyLibraryView()
-                                .frame(maxWidth: .infinity, minHeight: 400)
-                                .padding(.top, 60)
-                        }
-                    } else if layoutMode == .list {
-                        List {
-                            ForEach(dataManager.shows) { show in
-                                if isReordering {
-                                    ShowListRow(show: show)
-                                        .wiggle(isWiggling: true, angle: (abs(show.channelName.hashValue) % 2 == 0) ? 1.2 : -1.2)
-                                } else {
-                                    NavigationLink(destination: ShowDetailView(show: show, showFullPlayer: $showFullPlayer)) {
-                                        ShowListRow(show: show)
-                                    }
-                                    .contextMenu { showContextMenu(for: show) }
-                                    .swipeActions(edge: .trailing) {
-                                        Button(role: .destructive) {
-                                            showToDelete = show
-                                            confirmDeleteShow = true
-                                        } label: { Label("Delete", systemImage: "trash") }
-                                    }
-                                }
+                                EmptyLibraryView()
+                                    .frame(maxWidth: .infinity, minHeight: 400)
+                                    .padding(.top, 60)
                             }
-                            .onMove(perform: isReordering ? { source, dest in
-                                withAnimation {
-                                    dataManager.moveShow(fromOffsets: source, toOffset: dest)
+                        } else if layoutMode == .list {
+                            List {
+                                ForEach(dataManager.shows) { show in
+                                    if isReordering {
+                                        ShowListRow(show: show)
+                                            .wiggle(isWiggling: true, angle: (abs(show.channelName.hashValue) % 2 == 0) ? 1.2 : -1.2)
+                                    } else {
+                                        NavigationLink(destination: ShowDetailView(show: show, showFullPlayer: $showFullPlayer)) {
+                                            ShowListRow(show: show)
+                                        }
+                                        .contextMenu { showContextMenu(for: show) }
+                                        .swipeActions(edge: .trailing) {
+                                            Button(role: .destructive) {
+                                                showToDelete = show
+                                                confirmDeleteShow = true
+                                            } label: { Label("Delete", systemImage: "trash") }
+                                        }
+                                    }
                                 }
-                            } : nil)
-                        }
-                        .environment(\.editMode, isReordering ? .constant(.active) : .constant(.inactive))
-                        .listStyle(PlainListStyle())
-                        .padding(.bottom, (player.currentEpisode != nil || radio.currentStation != nil) ? 90 : 0)
-                        .refreshable {
-                            guard !isReordering else { return }
-                            await dataManager.syncSubscriptionsAsync()
-                            await dataManager.loadDataAsync()
-                        }
-                    } else {
-                        ScrollView {
-                            RefreshControlInstaller(onRefresh: {
+                                .onMove(perform: isReordering ? { source, dest in
+                                    withAnimation {
+                                        dataManager.moveShow(fromOffsets: source, toOffset: dest)
+                                    }
+                                } : nil)
+                            }
+                            .environment(\.editMode, isReordering ? .constant(.active) : .constant(.inactive))
+                            .listStyle(PlainListStyle())
+                            .padding(.bottom, (player.currentEpisode != nil || radio.currentStation != nil) ? 90 : 0)
+                            .refreshable {
                                 guard !isReordering else { return }
                                 await dataManager.syncSubscriptionsAsync()
                                 await dataManager.loadDataAsync()
-                            })
-                            .frame(height: 1)
+                            }
+                        } else {
+                            let isCompact = (layoutMode == .grid3)
+                            let metrics = gridMetrics(for: geo.size.width, compact: isCompact)
 
-                            LazyVGrid(
-                                columns: gridColumns(layoutMode == .grid3 ? 3 : 2),
-                                spacing: layoutMode == .grid3 ? 12 : 20
-                            ) {
-                                ForEach(dataManager.shows) { show in
-                                    if isReordering {
-                                        ShowCard(show: show, compact: layoutMode == .grid3)
-                                            .wiggle(isWiggling: true, angle: (abs(show.channelName.hashValue) % 2 == 0) ? 1.5 : -1.5)
-                                            .onDrag {
-                                                self.draggedShow = show
-                                                return NSItemProvider(object: show.channelName as NSString)
+                            ScrollView {
+                                RefreshControlInstaller(onRefresh: {
+                                    guard !isReordering else { return }
+                                    await dataManager.syncSubscriptionsAsync()
+                                    await dataManager.loadDataAsync()
+                                })
+                                .frame(height: 1)
+
+                                LazyVGrid(
+                                    columns: metrics.columns,
+                                    spacing: metrics.spacing
+                                ) {
+                                    ForEach(dataManager.shows) { show in
+                                        if isReordering {
+                                            ShowCard(show: show, compact: isCompact, artSizeOverride: metrics.artSize)
+                                                .wiggle(isWiggling: true, angle: (abs(show.channelName.hashValue) % 2 == 0) ? 1.5 : -1.5)
+                                                .onDrag {
+                                                    self.draggedShow = show
+                                                    return NSItemProvider(object: show.channelName as NSString)
+                                                }
+                                                .onDrop(
+                                                    of: [UTType.text.identifier],
+                                                    delegate: ShowDropDelegate(targetShow: show, draggedShow: $draggedShow, dataManager: dataManager)
+                                                )
+                                        } else {
+                                            NavigationLink(destination: ShowDetailView(show: show, showFullPlayer: $showFullPlayer)) {
+                                                ShowCard(show: show, compact: isCompact, artSizeOverride: metrics.artSize)
                                             }
-                                            .onDrop(
-                                                of: [UTType.text.identifier],
-                                                delegate: ShowDropDelegate(targetShow: show, draggedShow: $draggedShow, dataManager: dataManager)
-                                            )
-                                    } else {
-                                        NavigationLink(destination: ShowDetailView(show: show, showFullPlayer: $showFullPlayer)) {
-                                            ShowCard(show: show, compact: layoutMode == .grid3)
+                                            .buttonStyle(PlainButtonStyle())
+                                            .contextMenu { showContextMenu(for: show) }
                                         }
-                                        .buttonStyle(PlainButtonStyle())
-                                        .contextMenu { showContextMenu(for: show) }
                                     }
                                 }
+                                .padding(.horizontal, metrics.hPadding)
+                                .padding(.top, 8)
+                                .padding(.bottom, (player.currentEpisode != nil || radio.currentStation != nil) ? 90 : 20)
                             }
-                            .padding(.horizontal, layoutMode == .grid3 ? 12 : 16)
-                            .padding(.top, 8)
-                            .padding(.bottom, (player.currentEpisode != nil || radio.currentStation != nil) ? 90 : 20)
                         }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .navigationTitle("Library")
@@ -265,6 +283,7 @@ struct LibraryView: View {
                 MergeShowSheet(sourceShow: show)
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .id(navigationID)
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("popToLibraryRoot"))) { _ in
             navigationID = UUID()
@@ -464,12 +483,13 @@ struct ShowListRow: View {
 struct ShowCard: View {
     let show: PodcastShow
     var compact: Bool = false
+    var artSizeOverride: CGFloat? = nil
     @ObservedObject var dataManager = DataManager.shared
     @State private var artwork: UIImage? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 4 : 8) {
-            let artSize: CGFloat = compact ? 110 : 170
+            let artSize: CGFloat = artSizeOverride ?? (compact ? 110 : 170)
             let badgeSize: CGFloat = compact ? 22 : 30
             let badgeOffset: CGFloat = badgeSize * 0.2
             ZStack(alignment: .bottomTrailing) {
@@ -498,6 +518,7 @@ struct ShowCard: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            .frame(width: artSize, alignment: .leading)
             .padding(.horizontal, 2)
         }
         .padding(.bottom, 4)
@@ -624,8 +645,10 @@ struct ShowDetailView: View {
                             }
                             .buttonStyle(SpringButtonStyle())
                         }
+                        .frame(maxWidth: 540)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 16)
+                        .frame(maxWidth: .infinity)
                     }
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
@@ -662,10 +685,13 @@ struct ShowDetailView: View {
                             .padding(.horizontal, 16)
                         }
                         .buttonStyle(SpringButtonStyle())
+                        .frame(maxWidth: 540)
+                        .frame(maxWidth: .infinity)
                         .sheet(isPresented: $showChannelBrowser) {
                             NavigationView {
                                 ChannelBrowserView(url: channelUrl, initialTitle: currentShow.channelName)
                             }
+                            .navigationViewStyle(StackNavigationViewStyle())
                         }
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
@@ -1297,6 +1323,7 @@ struct MergeShowSheet: View {
                 Text("Are you sure you want to move \(sourceShow.episodes.count) episode(s) from \"\(sourceShow.channelName)\" into \"\(effectiveTargetChannel)\"?")
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 }
 
@@ -1400,6 +1427,7 @@ struct MoveEpisodeSheet: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 }
 

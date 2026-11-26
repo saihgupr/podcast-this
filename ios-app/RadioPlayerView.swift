@@ -49,17 +49,20 @@ struct RadioPlayerView: View {
 
             VStack(spacing: 0) {
                 header
+                    .frame(maxWidth: 540)
                     .padding(.horizontal, 20)
                     .padding(.top, 14)
                     .padding(.bottom, 18)
 
                 GeometryReader { geo in
+                    let centerpieceHeight = min(240, max(150, geo.size.height * 0.34))
+
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 0) {
                             Spacer(minLength: 0)
                             Spacer(minLength: 0)
 
-                            centerpiece
+                            centerpiece(height: centerpieceHeight)
                                 .padding(.bottom, 22)
 
                             stationBlock
@@ -72,12 +75,14 @@ struct RadioPlayerView: View {
 
                             Spacer(minLength: 0)
                         }
+                        .frame(maxWidth: 540)
                         .padding(.horizontal, 24)
-                        .frame(minHeight: geo.size.height)
+                        .frame(maxWidth: .infinity, minHeight: geo.size.height)
                     }
                 }
 
                 utilityRow
+                    .frame(maxWidth: 540)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 28)
             }
@@ -120,7 +125,7 @@ struct RadioPlayerView: View {
 
     // MARK: - Centerpiece
 
-    private var centerpiece: some View {
+    private func centerpiece(height: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 24)
                 .fill(PodcastTheme.accentGradient)
@@ -155,7 +160,7 @@ struct RadioPlayerView: View {
             livePill
                 .padding(16)
         }
-        .frame(height: 240)
+        .frame(height: height)
         .shadow(color: .black.opacity(0.5), radius: 24, x: 0, y: 12)
     }
 

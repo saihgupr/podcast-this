@@ -1710,6 +1710,7 @@ struct SegmentInspectorSheet: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 }
 

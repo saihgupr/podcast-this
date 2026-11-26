@@ -117,6 +117,7 @@ struct SubscriptionsView: View {
                 Text("This stops auto-downloading new episodes in the background.")
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 
     private var syncFooterView: some View {

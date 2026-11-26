@@ -357,9 +357,11 @@ struct SettingsView: View {
                         .background(Color(.secondarySystemGroupedBackground))
                         .cornerRadius(16)
                     }
+                    .frame(maxWidth: 700)
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
                     .padding(.bottom, 80)
+                    .frame(maxWidth: .infinity)
                 }
             }
             .navigationTitle("Settings")
@@ -368,6 +370,7 @@ struct SettingsView: View {
             }
             .onAppear { checkDeps() }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 
     private func checkDeps() {
