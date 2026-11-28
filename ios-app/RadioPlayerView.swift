@@ -73,18 +73,16 @@ struct RadioPlayerView: View {
 
                             transport
 
-                            Spacer(minLength: 0)
+                            Spacer(minLength: 24)
+
+                            utilityRow
+                                .padding(.bottom, 28)
                         }
                         .frame(maxWidth: 540)
                         .padding(.horizontal, 24)
                         .frame(maxWidth: .infinity, minHeight: geo.size.height)
                     }
                 }
-
-                utilityRow
-                    .frame(maxWidth: 540)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 28)
             }
         }
         .preferredColorScheme(.dark)
