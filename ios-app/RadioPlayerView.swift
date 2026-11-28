@@ -63,6 +63,7 @@ struct RadioPlayerView: View {
                             Spacer(minLength: 0)
 
                             centerpiece(height: centerpieceHeight)
+                                .padding(.top, 8)
                                 .padding(.bottom, 22)
 
                             stationBlock
